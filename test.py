@@ -398,6 +398,8 @@ def main_app():
                                     "image": None
                                 })
                                 st.toast(f"✅ 成功新增地點：{p_name}！", icon="✅")
+                                import time
+                                time.sleep(1)
                                 st.rerun()
                             else:
                                 st.error("⚠️ 該座標不在臺大校總區範圍內，無法新增！")
@@ -462,6 +464,8 @@ def main_app():
                                         "image": None
                                     })
                                 st.toast(f"✅ 已新增 {selected_existing} {new_floor} 樓！", icon="✅")
+                                import time
+                                time.sleep(1)
                                 st.rerun()
 
 # ==========================================
