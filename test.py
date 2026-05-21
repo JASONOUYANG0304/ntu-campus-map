@@ -57,7 +57,7 @@ def add_location(name, lat, lng, category, intro, floor="無"):
 def update_crowdedness(location_id, value):
 
     location = client.table("locations").select("crowdedness").eq("id", location_id).execute()
-    raw = json.loads(location.data[0]["crowdedness"])
+    raw = json.loads(location.data[0]["crowdedness"] or "[]")
     current = raw if isinstance(raw, list) else [raw]
 
     # 轉成新格式並過濾超過一小時的資料
