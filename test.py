@@ -36,8 +36,12 @@ client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def get_all_locations():
     # 讀取所有地點
-    response = client.table("locations").select("*").execute()
-    return response.data
+    try:
+        response = client.table("locations").select("*").execute()
+        return response.data
+    except Exception:
+        st.error("⚠️ 資料庫連線失敗，請稍等 10 秒後重新整理！")
+        return []
 
 def add_location(name, lat, lng, category, intro, floor="無"):
     # 新增一個地點
@@ -297,13 +301,15 @@ def main_app():
             avg_crowd = sum(f['crowd'] for f in floors) / len(floors)
             color = "green" if avg_crowd <= 2 else "orange" if avg_crowd <= 4 else "red"
             crowd_text = "🟢 空曠" if avg_crowd <= 2 else "🟡 普通" if avg_crowd <= 4 else "🔴 很擠"
+            floor_info = "" if (len(floors) == 1 and floors[0][
+                'floor'] == "無") else f'<span style="color: gray; font-size: 12px;">共 {len(floors)} 個樓層</span><br>'
             folium.Marker(
                 [first_floor['lat'], first_floor['lon']],
                 popup=folium.Popup(
                     f"""
                     <div style="font-family: sans-serif; min-width: 130px; padding: 4px;">
                         <b style="font-size: 14px;">{loc_name}</b><br>
-                        <span style="color: gray; font-size: 12px;">共 {len(floors)} 個樓層</span><br>
+                        {floor_info}
                         <hr style="margin: 4px 0;">
                         {crowd_text}
                     </div>
@@ -390,7 +396,7 @@ def main_app():
                 else:
                     st.write(f"- {c}")  # 相容舊格式
 
-            new_comment = st.text_input("新增評論...", key=f"comment_{selected_loc_name}_{selected_loc['floor']}")
+            new_comment = st.text_input("新增評論...", key=f"comment_{selected_loc_name}_{selected_loc['floor']}",max_chars=100)
             if st.button("送出評論", use_container_width=True):
                 if new_comment.strip():
                     selected_loc['comments'].append({
@@ -419,7 +425,7 @@ def main_app():
                         "選擇樓層",
                         ["無", "B2", "B1", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
                     )
-                    new_desc = st.text_area("介紹")
+                    new_desc = st.text_area("介紹",max_chars=200)
 
                     st.session_state.pending_name = new_name
                     st.session_state.pending_floor = new_floor
@@ -493,7 +499,7 @@ def main_app():
                                 available_floors,
                                 key="new_floor_existing"
                             )
-                            new_desc = st.text_area("介紹", key="new_desc_existing")
+                            new_desc = st.text_area("介紹", key="new_desc_existing",max_chars=200)
 
                             st.session_state.pending_floor = new_floor
                             st.session_state.pending_desc = new_desc
