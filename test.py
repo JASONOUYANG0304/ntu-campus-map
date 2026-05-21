@@ -295,9 +295,20 @@ def main_app():
             first_floor = floors[0]
             avg_crowd = sum(f['crowd'] for f in floors) / len(floors)
             color = "green" if avg_crowd <= 2 else "orange" if avg_crowd <= 4 else "red"
+            crowd_text = "🟢 空曠" if avg_crowd <= 2 else "🟡 普通" if avg_crowd <= 4 else "🔴 很擠"
             folium.Marker(
                 [first_floor['lat'], first_floor['lon']],
-                popup=f"<b>{loc_name}</b><br>樓層數: {len(floors)}<br>平均擁擠度: {round(avg_crowd, 1)}/5",
+                popup=folium.Popup(
+                    f"""
+                    <div style="font-family: sans-serif; min-width: 130px; padding: 4px;">
+                        <b style="font-size: 14px;">{loc_name}</b><br>
+                        <span style="color: gray; font-size: 12px;">共 {len(floors)} 個樓層</span><br>
+                        <hr style="margin: 4px 0;">
+                        {crowd_text}
+                    </div>
+                    """,
+                    max_width=200
+                ),
                 tooltip=loc_name,
                 icon=folium.Icon(color=color, icon="info-sign")
             ).add_to(m)
