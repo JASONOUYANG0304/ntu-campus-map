@@ -65,13 +65,44 @@ def add_location(name, lat, lng, category, intro, floor="無"):
 
 
 def update_crowdedness(location_id, value):
+    from datetime import datetime, timedelta
     location = client.table("locations").select("crowdedness").eq("id", location_id).execute()
     raw = json.loads(location.data[0]["crowdedness"])
     current = raw if isinstance(raw, list) else [raw]
-    current.append(value)
+
+    # 轉成新格式並過濾超過一小時的資料
+    one_hour_ago = datetime.now() - timedelta(hours=1)
+    converted = []
+    for item in current:
+        if isinstance(item, dict):
+            if datetime.fromisoformat(item["time"]) > one_hour_ago:
+                converted.append(item)
+        # 純數字格式視為過期，直接丟掉
+
+    # 新增這次的回報
+    converted.append({
+        "value": value,
+        "time": datetime.now().isoformat()
+    })
+
     client.table("locations").update(
-        {"crowdedness": json.dumps(current)}
+        {"crowdedness": json.dumps(converted)}
     ).eq("id", location_id).execute()
+
+def get_recent_crowd(crowdedness_json):
+    from datetime import datetime, timedelta
+    try:
+        data = json.loads(crowdedness_json)
+        if not isinstance(data, list) or len(data) == 0:
+            return None
+        one_hour_ago = datetime.now() - timedelta(hours=1)
+        recent = [
+            item["value"] for item in data
+            if isinstance(item, dict) and datetime.fromisoformat(item["time"]) > one_hour_ago
+        ]
+        return round(sum(recent) / len(recent), 1) if recent else None
+    except:
+        return None
 
 def add_comment(location_id, comment):
     # 新增評論
@@ -147,14 +178,12 @@ if 'locations' not in st.session_state:
         cat = loc.get("category", "充電")
         name = loc["name"]
         if cat in st.session_state.locations:
-            crowdedness_raw = json.loads(loc.get("crowdedness", "[1]"))
-            crowdedness_data = crowdedness_raw if isinstance(crowdedness_raw, list) else [crowdedness_raw]
             floor_entry = {
                 "id": loc["id"],
                 "floor": loc.get("floor") or "無",
                 "lat": loc["lat"],
                 "lon": loc["lng"],
-                "crowd": round(sum(crowdedness_data) / len(crowdedness_data), 1) if crowdedness_data else 1,
+                "crowd": get_recent_crowd(loc.get("crowdedness", "[]")) or 1,
                 "comments": json.loads(loc.get("comments", "[]")),
                 "desc": loc.get("intro", ""),
                 "image": None
@@ -301,8 +330,7 @@ def main_app():
                     if crowd_cols[i - 1].button(str(i), key=f"crowd_{selected_loc_name}_{selected_loc['floor']}_{i}"):
                         update_crowdedness(selected_loc['id'], i)
                         updated = client.table("locations").select("crowdedness").eq("id", selected_loc['id']).execute()
-                        data = json.loads(updated.data[0]["crowdedness"])
-                        selected_loc['crowd'] = round(sum(data) / len(data), 1) if data else 1
+                        selected_loc['crowd'] = get_recent_crowd(updated.data[0]["crowdedness"]) or 1
                         st.success(f"已更新！目前平均擁擠度：{selected_loc['crowd']} / 5")
                         st.rerun()
             else:
