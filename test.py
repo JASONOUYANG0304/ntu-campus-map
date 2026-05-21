@@ -178,6 +178,8 @@ if 'pending_floor' not in st.session_state:
     st.session_state.pending_floor = "無"
 if 'pending_desc' not in st.session_state:
     st.session_state.pending_desc = ""
+if 'crowd_voted' not in st.session_state:
+    st.session_state.crowd_voted = {}
 
 # 從資料庫讀取地點
 if 'locations' not in st.session_state:
@@ -365,13 +367,24 @@ def main_app():
             st.write("回報擁擠狀況：")
             if st.session_state.user_role == "student":
                 crowd_cols = st.columns(5)
-                for i in range(1, 6):
-                    if crowd_cols[i - 1].button(str(i), key=f"crowd_{selected_loc_name}_{selected_loc['floor']}_{i}"):
-                        update_crowdedness(selected_loc['id'], i)
-                        updated = client.table("locations").select("crowdedness").eq("id", selected_loc['id']).execute()
-                        selected_loc['crowd'] = get_recent_crowd(updated.data[0]["crowdedness"])
-                        st.success(f"已更新！目前平均擁擠度：{selected_loc['crowd']} / 5")
-                        st.rerun()
+                loc_key = f"{selected_loc['id']}"
+                last_voted = st.session_state.crowd_voted.get(loc_key)
+                cooldown_minutes = 3
+
+                if last_voted and datetime.now(TZ_TW) - last_voted < timedelta(minutes=cooldown_minutes):
+                    remaining = cooldown_minutes * 60 - int((datetime.now(TZ_TW) - last_voted).total_seconds())
+                    st.caption(f"⏳ 你已回報過，請等待 {remaining} 秒後再回報")
+                else:
+                    for i in range(1, 6):
+                        if crowd_cols[i - 1].button(str(i),
+                                                    key=f"crowd_{selected_loc_name}_{selected_loc['floor']}_{i}"):
+                            update_crowdedness(selected_loc['id'], i)
+                            updated = client.table("locations").select("crowdedness").eq("id",
+                                                                                         selected_loc['id']).execute()
+                            selected_loc['crowd'] = get_recent_crowd(updated.data[0]["crowdedness"])
+                            st.session_state.crowd_voted[loc_key] = datetime.now(TZ_TW)
+                            st.success(f"已更新！目前平均擁擠度：{selected_loc['crowd']} / 5")
+                            st.rerun()
             else:
                 st.caption("請登入台大信箱才能回報擁擠度")
 
