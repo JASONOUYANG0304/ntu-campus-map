@@ -54,23 +54,15 @@ def add_location(name, lat, lng, category, intro, floor="無"):
     response = client.table("locations").insert(data).execute()
     return response.data
 
-def update_score(location_id, delta):
-    # 推 delta=+1，噓 delta=-1
-    location = client.table("locations").select("score").eq("id", location_id).execute()
-    current_score = location.data[0]["score"]
-    client.table("locations").update(
-        {"score": current_score + delta}
-    ).eq("id", location_id).execute()
+# def update_score(location_id, delta):
+#     # 推 delta=+1，噓 delta=-1
+#     location = client.table("locations").select("score").eq("id", location_id).execute()
+#     current_score = location.data[0]["score"]
+#     client.table("locations").update(
+#         {"score": current_score + delta}
+#     ).eq("id", location_id).execute()
 
-def calculate_distance(lat1, lon1, lat2, lon2):
-    # 計算兩點距離（公尺）
-    R = 6371000
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
 
 def update_crowdedness(location_id, value):
     location = client.table("locations").select("crowdedness").eq("id", location_id).execute()
@@ -378,6 +370,8 @@ def main_app():
                             st.error("請輸入地點名稱！")
                         elif not st.session_state.pending_lat:
                             st.error("請先在地圖上點擊你要新增的位置！")
+                        elif new_name in st.session_state.locations[st.session_state.current_category]:
+                            st.error(f"「{new_name}」已存在！如果要新增樓層，請選擇「現有地點的新樓層」。")
                         else:
                             pt = Point(st.session_state.pending_lon, st.session_state.pending_lat)
                             if ntu_campus_poly.contains(pt):
@@ -403,7 +397,7 @@ def main_app():
                                     "desc": st.session_state.pending_desc,
                                     "image": None
                                 })
-                                st.success(f"成功新增地點：{p_name}！")
+                                st.toast(f"✅ 成功新增地點：{p_name}！", icon="✅")
                                 st.rerun()
                             else:
                                 st.error("⚠️ 該座標不在臺大校總區範圍內，無法新增！")
@@ -415,45 +409,60 @@ def main_app():
                         st.warning("目前此類別還沒有地點")
                     else:
                         selected_existing = st.selectbox("選擇要歸入的地點", existing_names)
-                        new_floor = st.selectbox(
-                            "選擇樓層",
-                            ["無", "B2", "B1", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
-                            key="new_floor_existing"
-                        )
-                        new_desc = st.text_area("介紹", key="new_desc_existing")
 
-                        st.session_state.pending_floor = new_floor
-                        st.session_state.pending_desc = new_desc
+                        # 過濾已存在的樓層
+                        existing_floor_names = [f['floor'] for f in
+                                                st.session_state.locations[st.session_state.current_category][
+                                                    selected_existing]]
+                        available_floors = [f for f in
+                                            ["無", "B2", "B1", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] if
+                                            f not in existing_floor_names]
 
-                        if st.button("新增樓層", type="primary", use_container_width=True):
-                            existing_floors = st.session_state.locations[st.session_state.current_category][
-                                selected_existing]
-                            existing_lat = existing_floors[0]['lat']
-                            existing_lon = existing_floors[0]['lon']
-
-                            result = add_location(
-                                name=selected_existing,
-                                lat=existing_lat,
-                                lng=existing_lon,
-                                category=st.session_state.current_category,
-                                intro=st.session_state.pending_desc,
-                                floor=st.session_state.pending_floor
+                        if not available_floors:
+                            st.warning("此地點所有樓層都已新增完畢！")
+                        else:
+                            new_floor = st.selectbox(
+                                "選擇樓層",
+                                available_floors,
+                                key="new_floor_existing"
                             )
-                            new_id = result[0]["id"]
-                            if selected_existing not in st.session_state.locations[st.session_state.current_category]:
-                                st.session_state.locations[st.session_state.current_category][selected_existing] = []
-                            st.session_state.locations[st.session_state.current_category][selected_existing].append({
-                                "id": new_id,
-                                "floor": st.session_state.pending_floor,
-                                "lat": existing_lat,
-                                "lon": existing_lon,
-                                "crowd": 1,
-                                "comments": [],
-                                "desc": st.session_state.pending_desc,
-                                "image": None
-                            })
-                            st.success(f"已新增 {selected_existing} {new_floor} 樓！")
-                            st.rerun()
+                            new_desc = st.text_area("介紹", key="new_desc_existing")
+
+                            st.session_state.pending_floor = new_floor
+                            st.session_state.pending_desc = new_desc
+
+                            if st.button("新增樓層", type="primary", use_container_width=True):
+                                existing_floors = st.session_state.locations[st.session_state.current_category][
+                                    selected_existing]
+                                existing_lat = existing_floors[0]['lat']
+                                existing_lon = existing_floors[0]['lon']
+
+                                result = add_location(
+                                    name=selected_existing,
+                                    lat=existing_lat,
+                                    lng=existing_lon,
+                                    category=st.session_state.current_category,
+                                    intro=st.session_state.pending_desc,
+                                    floor=st.session_state.pending_floor
+                                )
+                                new_id = result[0]["id"]
+                                if selected_existing not in st.session_state.locations[
+                                    st.session_state.current_category]:
+                                    st.session_state.locations[st.session_state.current_category][
+                                        selected_existing] = []
+                                st.session_state.locations[st.session_state.current_category][selected_existing].append(
+                                    {
+                                        "id": new_id,
+                                        "floor": st.session_state.pending_floor,
+                                        "lat": existing_lat,
+                                        "lon": existing_lon,
+                                        "crowd": 1,
+                                        "comments": [],
+                                        "desc": st.session_state.pending_desc,
+                                        "image": None
+                                    })
+                                st.toast(f"✅ 已新增 {selected_existing} {new_floor} 樓！", icon="✅")
+                                st.rerun()
 
 # ==========================================
 # 4. 程式執行入口
