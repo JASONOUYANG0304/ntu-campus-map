@@ -102,6 +102,22 @@ def add_comment(location_id, comment):
         {"comments": json.dumps(current_comments, ensure_ascii=False)}
     ).eq("id", location_id).execute()
 
+def upload_image(location_id, image_bytes, file_name):
+    # 上傳圖片到 Supabase Storage
+    file_path = f"{location_id}/{file_name}"
+    client.storage.from_("location-images").upload(
+        file_path,
+        image_bytes,
+        {"content-type": "image/jpeg"}
+    )
+    # 取得公開網址
+    url = client.storage.from_("location-images").get_public_url(file_path)
+    # 更新資料表
+    client.table("locations").update(
+        {"image_url": url}
+    ).eq("id", location_id).execute()
+    return url
+
 # ==========================================
 # 驗證碼寄送
 # ==========================================
@@ -176,7 +192,7 @@ if 'locations' not in st.session_state:
                 "crowd": get_recent_crowd(loc.get("crowdedness", "[]")) or 1,
                 "comments": json.loads(loc.get("comments", "[]")),
                 "desc": loc.get("intro", ""),
-                "image": None
+                "image": loc.get("image_url")
             }
             if name not in st.session_state.locations[cat]:
                 st.session_state.locations[cat][name] = []
@@ -317,7 +333,7 @@ def main_app():
                 )
             selected_loc = floors_data[selected_floor_idx]
 
-            if selected_loc.get('image') is not None:
+            if selected_loc.get('image'):
                 st.image(selected_loc['image'], use_container_width=True)
 
             st.write(f"**介紹：** {selected_loc.get('desc', '無')}")
@@ -346,7 +362,9 @@ def main_app():
                 if st.button("送出圖片", key=f"btn_update_img_{selected_loc_name}_{selected_loc['floor']}",
                              use_container_width=True):
                     if update_img_file:
-                        selected_loc['image'] = update_img_file.read()
+                        image_bytes = update_img_file.read()
+                        url = upload_image(selected_loc['id'], image_bytes, update_img_file.name)
+                        selected_loc['image'] = url
                         st.success("圖片更新成功！")
                         st.rerun()
                     else:
