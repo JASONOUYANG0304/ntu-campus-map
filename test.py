@@ -1,10 +1,10 @@
 import streamlit as st
 import folium
 import smtplib
-import math
 import random
 import os
 import json
+from datetime import datetime, timedelta
 from streamlit_folium import st_folium
 from shapely.geometry import Point, Polygon
 from supabase import create_client
@@ -121,6 +121,7 @@ def send_verification_code(target_email):
     code = str(random.randint(100000, 999999))
     st.session_state["verify_code"] = code
     st.session_state["verify_email"] = target_email
+    st.session_state["verify_time"] = datetime.now().isoformat()
 
     # 組合信件
     msg = MIMEMultipart()
@@ -215,7 +216,11 @@ def login_page():
         if st.session_state.waiting_verify:
             code_input = st.text_input("輸入驗證碼")
             if st.button("驗證"):
-                if code_input == st.session_state.get("verify_code"):
+                verify_time = st.session_state.get("verify_time")
+                if verify_time and datetime.now() - datetime.fromisoformat(verify_time) > timedelta(minutes=10):
+                    st.error("驗證碼已過期，請重新寄送")
+                    st.session_state.waiting_verify = False
+                elif code_input == st.session_state.get("verify_code"):
                     st.session_state.logged_in = True
                     st.session_state.user_role = "student"
                     st.session_state.waiting_verify = False
