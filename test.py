@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+
 # ==========================================
 # 環境變數載入
 # ==========================================
@@ -22,7 +23,7 @@ try:
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
     GMAIL_ADDRESS = st.secrets["GMAIL_ADDRESS"]
     GMAIL_APP_PASSWORD = st.secrets["GMAIL_APP_PASSWORD"]
-except:
+except Exception:
     SUPABASE_URL = os.getenv("SUPABASE_URL")
     SUPABASE_KEY = os.getenv("SUPABASE_KEY")
     GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS")
@@ -257,7 +258,7 @@ def main_app():
     if col_logout.button("登出"):
         st.session_state.logged_in = False
         st.session_state.user_role = None
-        del st.session_state["locations"]  # 改這行
+        del st.session_state["locations"]
         st.rerun()
 
     if st.session_state.user_role == "student":
