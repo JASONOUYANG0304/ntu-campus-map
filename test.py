@@ -194,7 +194,7 @@ if 'locations' not in st.session_state:
                 "floor": loc.get("floor") or "無",
                 "lat": loc["lat"],
                 "lon": loc["lng"],
-                "crowd": get_recent_crowd(loc.get("crowdedness", "[]")) or 1,
+                "crowd": get_recent_crowd(loc.get("crowdedness", "[]")),
                 "comments": json.loads(loc.get("comments", "[]")),
                 "desc": loc.get("intro", ""),
                 "image": loc.get("image_url")
@@ -298,9 +298,10 @@ def main_app():
         current_data = st.session_state.locations[st.session_state.current_category]
         for loc_name, floors in current_data.items():
             first_floor = floors[0]
-            avg_crowd = sum(f['crowd'] for f in floors) / len(floors)
-            color = "green" if avg_crowd <= 2 else "orange" if avg_crowd <= 4 else "red"
-            crowd_text = "🟢 空曠" if avg_crowd <= 2 else "🟡 普通" if avg_crowd <= 4 else "🔴 很擠"
+            crowd_values = [f['crowd'] for f in floors if f['crowd'] is not None]
+            avg_crowd = sum(crowd_values) / len(crowd_values) if crowd_values else None
+            color = "gray" if avg_crowd is None else "green" if avg_crowd <= 2 else "orange" if avg_crowd <= 4 else "red"
+            crowd_text = "⚪ 暫無資訊" if avg_crowd is None else "🟢 空曠" if avg_crowd <= 2 else "🟡 普通" if avg_crowd <= 4 else "🔴 很擠"
             floor_info = "" if (len(floors) == 1 and floors[0][
                 'floor'] == "無") else f'<span style="color: gray; font-size: 12px;">共 {len(floors)} 個樓層</span><br>'
             folium.Marker(
@@ -355,7 +356,10 @@ def main_app():
                 st.image(selected_loc['image'], use_container_width=True)
 
             st.write(f"**介紹：** {selected_loc.get('desc', '無')}")
-            st.write(f"**平均擁擠程度：** {selected_loc['crowd']} / 5")
+            if selected_loc['crowd'] is None:
+                st.write("**平均擁擠程度：** ⚪ 暫無近期資料")
+            else:
+                st.write(f"**平均擁擠程度：** {selected_loc['crowd']} / 5")
 
             # 功能 1: 回報擁擠狀況
             st.write("回報擁擠狀況：")
@@ -365,7 +369,7 @@ def main_app():
                     if crowd_cols[i - 1].button(str(i), key=f"crowd_{selected_loc_name}_{selected_loc['floor']}_{i}"):
                         update_crowdedness(selected_loc['id'], i)
                         updated = client.table("locations").select("crowdedness").eq("id", selected_loc['id']).execute()
-                        selected_loc['crowd'] = get_recent_crowd(updated.data[0]["crowdedness"]) or 1
+                        selected_loc['crowd'] = get_recent_crowd(updated.data[0]["crowdedness"])
                         st.success(f"已更新！目前平均擁擠度：{selected_loc['crowd']} / 5")
                         st.rerun()
             else:
