@@ -54,18 +54,8 @@ def add_location(name, lat, lng, category, intro, floor="無"):
     response = client.table("locations").insert(data).execute()
     return response.data
 
-# def update_score(location_id, delta):
-#     # 推 delta=+1，噓 delta=-1
-#     location = client.table("locations").select("score").eq("id", location_id).execute()
-#     current_score = location.data[0]["score"]
-#     client.table("locations").update(
-#         {"score": current_score + delta}
-#     ).eq("id", location_id).execute()
-
-
-
 def update_crowdedness(location_id, value):
-    from datetime import datetime, timedelta
+
     location = client.table("locations").select("crowdedness").eq("id", location_id).execute()
     raw = json.loads(location.data[0]["crowdedness"])
     current = raw if isinstance(raw, list) else [raw]
@@ -90,7 +80,6 @@ def update_crowdedness(location_id, value):
     ).eq("id", location_id).execute()
 
 def get_recent_crowd(crowdedness_json):
-    from datetime import datetime, timedelta
     try:
         data = json.loads(crowdedness_json)
         if not isinstance(data, list) or len(data) == 0:
@@ -209,9 +198,16 @@ def login_page():
             if not email.endswith("@ntu.edu.tw"):
                 st.error("請輸入有效的臺大信箱！")
             else:
-                send_verification_code(email)
-                st.session_state.waiting_verify = True
-                st.success("驗證碼已寄出，請檢查信箱")
+                # 檢查 60 秒冷卻
+                last_send = st.session_state.get("last_send_time")
+                if last_send and datetime.now() - datetime.fromisoformat(last_send) < timedelta(seconds=60):
+                    remaining = 60 - int((datetime.now() - datetime.fromisoformat(last_send)).total_seconds())
+                    st.warning(f"請等待 {remaining} 秒後再重新寄送")
+                else:
+                    send_verification_code(email)
+                    st.session_state["last_send_time"] = datetime.now().isoformat()
+                    st.session_state.waiting_verify = True
+                    st.success("驗證碼已寄出，請檢查信箱")
 
         if st.session_state.waiting_verify:
             code_input = st.text_input("輸入驗證碼")
