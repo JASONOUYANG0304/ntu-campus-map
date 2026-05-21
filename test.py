@@ -94,10 +94,12 @@ def get_recent_crowd(crowdedness_json):
         return None
 
 def add_comment(location_id, comment):
-    # 新增評論
     location = client.table("locations").select("comments").eq("id", location_id).execute()
     current_comments = json.loads(location.data[0]["comments"])
-    current_comments.append(comment)
+    current_comments.append({
+        "text": comment,
+        "time": datetime.now().strftime("%Y/%m/%d %H:%M")
+    })
     client.table("locations").update(
         {"comments": json.dumps(current_comments, ensure_ascii=False)}
     ).eq("id", location_id).execute()
@@ -373,12 +375,18 @@ def main_app():
             # 功能 3: 留言評論
             st.markdown("##### 💬 留言評論")
             for c in selected_loc['comments']:
-                st.write(f"- {c}")
+                if isinstance(c, dict):
+                    st.write(f"- {c['text']}　*{c['time']}*")
+                else:
+                    st.write(f"- {c}")  # 相容舊格式
 
             new_comment = st.text_input("新增評論...", key=f"comment_{selected_loc_name}_{selected_loc['floor']}")
             if st.button("送出評論", use_container_width=True):
                 if new_comment:
-                    selected_loc['comments'].append(new_comment)
+                    selected_loc['comments'].append({
+                        "text": new_comment,
+                        "time": datetime.now().strftime("%Y/%m/%d %H:%M")
+                    })
                     add_comment(selected_loc['id'], new_comment)
                     st.rerun()
 
