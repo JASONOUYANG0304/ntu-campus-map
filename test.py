@@ -469,6 +469,8 @@ def main_app():
                                     "image": None
                                 })
                                 st.toast(f"✅ 成功新增地點：{p_name}！", icon="✅")
+                                st.session_state.pending_lat = None
+                                st.session_state.pending_lon = None
                                 import time
                                 time.sleep(1)
                                 st.rerun()
