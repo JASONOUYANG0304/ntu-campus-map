@@ -4,7 +4,7 @@ import smtplib
 import random
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from streamlit_folium import st_folium
 from shapely.geometry import Point, Polygon
 from supabase import create_client
@@ -33,7 +33,7 @@ except Exception:
 # 資料庫操作
 # ==========================================
 client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
+TZ_TW = timezone(timedelta(hours=8))
 def get_all_locations():
     # 讀取所有地點
     try:
@@ -66,7 +66,7 @@ def update_crowdedness(location_id, value):
     current = raw if isinstance(raw, list) else [raw]
 
     # 轉成新格式並過濾超過一小時的資料
-    one_hour_ago = datetime.now() - timedelta(hours=1)
+    one_hour_ago = datetime.now(TZ_TW) - timedelta(hours=1)
     converted = []
     for item in current:
         if isinstance(item, dict):
@@ -77,7 +77,7 @@ def update_crowdedness(location_id, value):
     # 新增這次的回報
     converted.append({
         "value": value,
-        "time": datetime.now().isoformat()
+        "time": datetime.now(TZ_TW).isoformat()
     })
 
     client.table("locations").update(
@@ -89,7 +89,7 @@ def get_recent_crowd(crowdedness_json):
         data = json.loads(crowdedness_json)
         if not isinstance(data, list) or len(data) == 0:
             return None
-        one_hour_ago = datetime.now() - timedelta(hours=1)
+        one_hour_ago = datetime.now(TZ_TW) - timedelta(hours=1)
         recent = [
             item["value"] for item in data
             if isinstance(item, dict) and datetime.fromisoformat(item["time"]) > one_hour_ago
@@ -103,14 +103,14 @@ def add_comment(location_id, comment):
     current_comments = json.loads(location.data[0]["comments"])
     current_comments.append({
         "text": comment,
-        "time": datetime.now().strftime("%Y/%m/%d %H:%M")
+        "time": datetime.now(TZ_TW).strftime("%Y/%m/%d %H:%M")
     })
     client.table("locations").update(
         {"comments": json.dumps(current_comments, ensure_ascii=False)}
     ).eq("id", location_id).execute()
 
 def upload_image(location_id, image_bytes, file_name):
-    timestamp = int(datetime.now().timestamp())
+    timestamp = int(datetime.now(TZ_TW).timestamp())
     file_path = f"{location_id}/{timestamp}_{file_name}"
     client.storage.from_("location-images").upload(
         file_path,
@@ -131,7 +131,7 @@ def send_verification_code(target_email):
     code = str(random.randint(100000, 999999))
     st.session_state["verify_code"] = code
     st.session_state["verify_email"] = target_email
-    st.session_state["verify_time"] = datetime.now().isoformat()
+    st.session_state["verify_time"] = datetime.now(TZ_TW).isoformat()
 
     # 組合信件
     msg = MIMEMultipart()
@@ -221,12 +221,12 @@ def login_page():
             else:
                 # 檢查 60 秒冷卻
                 last_send = st.session_state.get("last_send_time")
-                if last_send and datetime.now() - datetime.fromisoformat(last_send) < timedelta(seconds=60):
-                    remaining = 60 - int((datetime.now() - datetime.fromisoformat(last_send)).total_seconds())
+                if last_send and datetime.now(TZ_TW) - datetime.fromisoformat(last_send) < timedelta(seconds=60):
+                    remaining = 60 - int((datetime.now(TZ_TW) - datetime.fromisoformat(last_send)).total_seconds())
                     st.warning(f"請等待 {remaining} 秒後再重新寄送")
                 else:
                     send_verification_code(email)
-                    st.session_state["last_send_time"] = datetime.now().isoformat()
+                    st.session_state["last_send_time"] = datetime.now(TZ_TW).isoformat()
                     st.session_state.waiting_verify = True
                     st.success("驗證碼已寄出，請檢查信箱")
 
@@ -234,7 +234,7 @@ def login_page():
             code_input = st.text_input("輸入驗證碼")
             if st.button("驗證"):
                 verify_time = st.session_state.get("verify_time")
-                if verify_time and datetime.now() - datetime.fromisoformat(verify_time) > timedelta(minutes=10):
+                if verify_time and datetime.now(TZ_TW) - datetime.fromisoformat(verify_time) > timedelta(minutes=10):
                     st.error("驗證碼已過期，請重新寄送")
                     st.session_state.waiting_verify = False
                 elif code_input == st.session_state.get("verify_code"):
@@ -401,7 +401,7 @@ def main_app():
                 if new_comment.strip():
                     selected_loc['comments'].append({
                         "text": new_comment,
-                        "time": datetime.now().strftime("%Y/%m/%d %H:%M")
+                        "time": datetime.now(TZ_TW).strftime("%Y/%m/%d %H:%M")
                     })
                     add_comment(selected_loc['id'], new_comment)
                     st.rerun()
@@ -475,7 +475,7 @@ def main_app():
                                 time.sleep(1)
                                 st.rerun()
                             else:
-                                st.error("⚠️ 該座標不在臺大校總區範圍內，無法新增！")
+                                st.error("⚠️該座標不在臺大校總區範圍內，無法新增！")
 
                 else:
                     # 現有地點的新樓層
