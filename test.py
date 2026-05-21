@@ -314,7 +314,7 @@ def main_app():
                 icon=folium.Icon(color=color, icon="info-sign")
             ).add_to(m)
 
-        map_data = st_folium(m, width=500, height=450)
+        map_data = st_folium(m, height=450, use_container_width=True)
 
         clicked_lat, clicked_lon = None, None
         if map_data.get("last_clicked"):
@@ -392,7 +392,7 @@ def main_app():
 
             new_comment = st.text_input("新增評論...", key=f"comment_{selected_loc_name}_{selected_loc['floor']}")
             if st.button("送出評論", use_container_width=True):
-                if new_comment:
+                if new_comment.strip():
                     selected_loc['comments'].append({
                         "text": new_comment,
                         "time": datetime.now().strftime("%Y/%m/%d %H:%M")
@@ -404,7 +404,7 @@ def main_app():
 
         # 新增地點功能
         if st.session_state.user_role == "student":
-            with st.expander("➕ 新增地點 (需先點選地圖獲取座標)"):
+            with st.expander("➕ 新增地點"):
 
                 # 先選擇新增類型
                 add_mode = st.radio(
@@ -431,7 +431,7 @@ def main_app():
                         st.warning("請先在地圖上點擊要新增的位置")
 
                     if st.button("新增此地點", type="primary", use_container_width=True):
-                        if not new_name:
+                        if not new_name.strip():
                             st.error("請輸入地點名稱！")
                         elif not st.session_state.pending_lat:
                             st.error("請先在地圖上點擊你要新增的位置！")
