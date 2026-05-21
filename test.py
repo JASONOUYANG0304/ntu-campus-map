@@ -105,16 +105,14 @@ def add_comment(location_id, comment):
     ).eq("id", location_id).execute()
 
 def upload_image(location_id, image_bytes, file_name):
-    # 上傳圖片到 Supabase Storage
-    file_path = f"{location_id}/{file_name}"
+    timestamp = int(datetime.now().timestamp())
+    file_path = f"{location_id}/{timestamp}_{file_name}"
     client.storage.from_("location-images").upload(
         file_path,
         image_bytes,
-        {"content-type": "image/jpeg"}
+        {"content-type": "image/jpeg", "upsert": True}
     )
-    # 取得公開網址
     url = client.storage.from_("location-images").get_public_url(file_path)
-    # 更新資料表
     client.table("locations").update(
         {"image_url": url}
     ).eq("id", location_id).execute()
