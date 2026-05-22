@@ -332,6 +332,7 @@ def main_app():
     if col_logout.button("登出", use_container_width=True):
         st.session_state.logged_in = False
         st.session_state.user_role = None
+        st.session_state.pop("verify_email", None)
         if "locations" in st.session_state:
             del st.session_state["locations"]
         st.rerun()
@@ -590,7 +591,7 @@ def main_app():
                 if new_comment.strip():
                     new_c = {
                         "text": new_comment,
-                        "time": datetime.now(TZ_TW).strftime("%Y/%m/%d %H:%M"),
+                        "time": datetime.now(TZ_TW).strftime("%Y/%m/%d %H:%M:%S"),
                         "upvotes": 0,
                         "downvotes": 0,
                         "author": current_user
