@@ -379,7 +379,13 @@ def main_app():
 
     with col_map:
         st.write("點擊地圖任意處可獲取座標 (新增/修改地點時使用)")
-        m = folium.Map(location=[25.017, 121.539], zoom_start=16)
+        m = folium.Map(
+            location=[25.017, 121.539],
+            zoom_start=16,
+            min_zoom=14,
+            max_zoom=19,
+            max_bounds=True
+        )
 
         folium.Polygon(
             locations=folium_bounds,
