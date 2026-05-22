@@ -343,12 +343,9 @@ def main_app():
         st.warning("👁️ 訪客模式：可瀏覽與評論，但無法新增或修改地點。")
 
     categories = ["充電", "情緒釋放", "戶外放鬆", "排練", "面試"]
-    cols = st.columns(5)
-    for idx, cat in enumerate(categories):
-        if cols[idx].button(cat, use_container_width=True):
-            st.session_state.current_category = cat
-
-    st.markdown(f"### 目前選擇類別：**{st.session_state.current_category}**")
+    selected_cat = st.pills("選擇空間類別：", categories, default=st.session_state.current_category)
+    if selected_cat:
+        st.session_state.current_category = selected_cat
     st.divider()
 
     col_map, col_details = st.columns([3, 2])
@@ -442,81 +439,161 @@ def main_app():
             except Exception:
                 pass
 
-            if selected_loc.get('image'):
-                st.image(selected_loc['image'], use_container_width=True)
+            tab_info, tab_comments, tab_photo = st.tabs(["📍 資訊與擁擠度", "💬 留言評論", "📷 新增照片"])
 
-            st.write(f"**介紹：** {selected_loc.get('desc', '無')}")
+            with tab_info:
+                if selected_loc.get('image'):
+                    st.image(selected_loc['image'], use_container_width=True)
 
-            loc_vote_state = st.session_state.loc_votes.get(selected_loc['id'])
-            col_lup, col_ldown, _ = st.columns([1.5, 1.5, 3])
+                st.write(f"**介紹：** {selected_loc.get('desc', '無')}")
 
-            with col_lup:
-                lbl_up = f"👍 推 {selected_loc.get('upvotes', 0)}" + (" ✓" if loc_vote_state == 'up' else "")
-                if st.button(lbl_up, key=f"loc_up_{selected_loc['id']}", use_container_width=True):
-                    if loc_vote_state == 'up':
-                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
-                                                                                           'cancel_up')
-                        del st.session_state.loc_votes[selected_loc['id']]
-                    elif loc_vote_state == 'down':
-                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
-                                                                                           'switch_to_up')
-                        st.session_state.loc_votes[selected_loc['id']] = 'up'
+                loc_vote_state = st.session_state.loc_votes.get(selected_loc['id'])
+                col_lup, col_ldown, _ = st.columns([1.5, 1.5, 3])
+                with col_lup:
+                    lbl_up = f"👍推 {selected_loc.get('upvotes', 0)}" + (" ✓" if loc_vote_state == 'up' else "")
+                    if st.button(lbl_up, key=f"loc_up_{selected_loc['id']}", use_container_width=True):
+                        if loc_vote_state == 'up':
+                            selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
+                                                                                               'cancel_up')
+                            del st.session_state.loc_votes[selected_loc['id']]
+                        elif loc_vote_state == 'down':
+                            selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
+                                                                                               'switch_to_up')
+                            st.session_state.loc_votes[selected_loc['id']] = 'up'
+                        else:
+                            selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
+                                                                                               'upvote')
+                            st.session_state.loc_votes[selected_loc['id']] = 'up'
+                        st.rerun()
+                with col_ldown:
+                    lbl_down = f"👎噓 {selected_loc.get('downvotes', 0)}" + (" ✓" if loc_vote_state == 'down' else "")
+                    if st.button(lbl_down, key=f"loc_down_{selected_loc['id']}", use_container_width=True):
+                        if loc_vote_state == 'down':
+                            selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
+                                                                                               'cancel_down')
+                            del st.session_state.loc_votes[selected_loc['id']]
+                        elif loc_vote_state == 'up':
+                            selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
+                                                                                               'switch_to_down')
+                            st.session_state.loc_votes[selected_loc['id']] = 'down'
+                        else:
+                            selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
+                                                                                               'downvote')
+                            st.session_state.loc_votes[selected_loc['id']] = 'down'
+                        st.rerun()
+
+                st.divider()
+
+                display_crowd = f"{selected_loc['crowd']} / 5" if selected_loc['crowd'] != "待回報" else "待回報 / 5"
+                st.write(f"**平均擁擠程度（1為最不擁擠）：** {display_crowd}")
+
+                if st.session_state.user_role == "student":
+                    crowd_cols = st.columns(5)
+                    loc_key = f"{selected_loc['id']}"
+                    last_voted = st.session_state.crowd_voted.get(loc_key)
+                    cooldown_minutes = 3
+
+                    if last_voted and datetime.now(TZ_TW) - last_voted < timedelta(minutes=cooldown_minutes):
+                        remaining = cooldown_minutes * 60 - int((datetime.now(TZ_TW) - last_voted).total_seconds())
+                        st.caption(f"⏳ 你已回報過，請等待 {remaining} 秒後再回報")
                     else:
-                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'], 'upvote')
-                        st.session_state.loc_votes[selected_loc['id']] = 'up'
-                    st.rerun()
-
-            with col_ldown:
-                lbl_down = f"👎 噓 {selected_loc.get('downvotes', 0)}" + (" ✓" if loc_vote_state == 'down' else "")
-                if st.button(lbl_down, key=f"loc_down_{selected_loc['id']}", use_container_width=True):
-                    if loc_vote_state == 'down':
-                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
-                                                                                           'cancel_down')
-                        del st.session_state.loc_votes[selected_loc['id']]
-                    elif loc_vote_state == 'up':
-                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
-                                                                                           'switch_to_down')
-                        st.session_state.loc_votes[selected_loc['id']] = 'down'
-                    else:
-                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
-                                                                                           'downvote')
-                        st.session_state.loc_votes[selected_loc['id']] = 'down'
-                    st.rerun()
-
-            st.divider()
-            
-            display_crowd = f"{selected_loc['crowd']} / 5" if selected_loc['crowd'] != "待回報" else "待回報 / 5"
-            st.write(f"**平均擁擠程度（1為最不擁擠)：** {display_crowd}")
-
-            if st.session_state.user_role == "student":
-                crowd_cols = st.columns(5)
-                loc_key = f"{selected_loc['id']}"
-                last_voted = st.session_state.crowd_voted.get(loc_key)
-                cooldown_minutes = 3
-
-                if last_voted and datetime.now(TZ_TW) - last_voted < timedelta(minutes=cooldown_minutes):
-                    remaining = cooldown_minutes * 60 - int((datetime.now(TZ_TW) - last_voted).total_seconds())
-                    st.caption(f"⏳ 你已回報過，請等待 {remaining} 秒後再回報")
+                        for i in range(1, 6):
+                            if crowd_cols[i - 1].button(str(i),
+                                                        key=f"crowd_{selected_loc_name}_{selected_loc['floor']}_{i}"):
+                                update_crowdedness(selected_loc['id'], i)
+                                updated = client.table("locations").select("crowdedness").eq("id", selected_loc[
+                                    'id']).execute()
+                                selected_loc['crowd'] = get_recent_crowd(updated.data[0]["crowdedness"])
+                                st.session_state.crowd_voted[loc_key] = datetime.now(TZ_TW)
+                                new_display = f"{selected_loc['crowd']} / 5" if selected_loc[
+                                                                                    'crowd'] != "待回報" else "待回報 / 5"
+                                st.success(f"已更新！目前平均擁擠度：{new_display}")
+                                st.rerun()
                 else:
-                    for i in range(1, 6):
-                        if crowd_cols[i - 1].button(str(i), key=f"crowd_{selected_loc_name}_{selected_loc['floor']}_{i}"):
-                            update_crowdedness(selected_loc['id'], i)
-                            updated = client.table("locations").select("crowdedness").eq("id", selected_loc['id']).execute()
-                            selected_loc['crowd'] = get_recent_crowd(updated.data[0]["crowdedness"])
-                            st.session_state.crowd_voted[loc_key] = datetime.now(TZ_TW)
-                            
-                            new_display = f"{selected_loc['crowd']} / 5" if selected_loc['crowd'] != "待回報" else "待回報 / 5"
-                            st.success(f"已更新！目前平均擁擠度：{new_display}")
-                            st.rerun()
-            else:
-                st.caption("請登入台大信箱才能回報擁擠度")
+                    st.caption("請登入台大信箱才能回報擁擠度")
 
-            with st.expander("📷 上傳或更新此地點的圖片"):
+            with tab_comments:
+                st.markdown("##### 💬 留言評論")
+                limit_key = f"comment_limit_{selected_loc['id']}"
+                if limit_key not in st.session_state:
+                    st.session_state[limit_key] = 3
+                current_limit = st.session_state[limit_key]
+                total_comments = len(selected_loc['comments'])
+                current_user = st.session_state.get("verify_email", "guest")
+
+                for i in range(min(total_comments, current_limit)):
+                    c = selected_loc['comments'][i]
+                    if not isinstance(c, dict):
+                        c = {"text": c, "time": "未知", "upvotes": 0, "downvotes": 0, "author": "guest"}
+                        selected_loc['comments'][i] = c
+                    upvotes = c.get("upvotes", 0)
+                    downvotes = c.get("downvotes", 0)
+                    is_author = (c.get("author") == current_user) and (current_user != "guest")
+
+                    if is_author:
+                        col_text, col_up, col_down, col_del = st.columns([4, 1.2, 1.2, 0.8])
+                    else:
+                        col_text, col_up, col_down = st.columns([5, 1.5, 1.5])
+
+                    with col_text:
+                        st.write(f"- {c.get('text', '')}　*{c.get('time', '')}*")
+                    with col_up:
+                        if st.button(f"👍 推 {upvotes}", key=f"up_{selected_loc['id']}_{i}"):
+                            vote_key = f"{selected_loc['id']}_comment_{c.get('time', i)}_{c.get('text', i)[:10]}"
+                            if vote_key not in st.session_state.comment_voted:
+                                vote_comment(selected_loc['id'], i, "upvote")
+                                c["upvotes"] = upvotes + 1
+                                st.session_state.comment_voted.add(vote_key)
+                                st.rerun()
+                            else:
+                                st.toast("⚠️ 你已經對這則評論投過票囉！")
+                    with col_down:
+                        if st.button(f"👎 噓 {downvotes}", key=f"down_{selected_loc['id']}_{i}"):
+                            vote_key = f"{selected_loc['id']}_comment_{c.get('time', i)}_{c.get('text', i)[:10]}"
+                            if vote_key not in st.session_state.comment_voted:
+                                vote_comment(selected_loc['id'], i, "downvote")
+                                c["downvotes"] = downvotes + 1
+                                st.session_state.comment_voted.add(vote_key)
+                                st.rerun()
+                            else:
+                                st.toast("⚠️ 你已經對這則評論投過票囉！")
+                    if is_author:
+                        with col_del:
+                            if st.button("🗑️", key=f"del_{selected_loc['id']}_{i}", help="刪除你的留言"):
+                                delete_comment(selected_loc['id'], i)
+                                selected_loc['comments'].pop(i)
+                                st.rerun()
+
+                if total_comments > current_limit:
+                    if st.button("🔽 看更多留言", use_container_width=True, key=f"btn_more_{selected_loc['id']}"):
+                        st.session_state[limit_key] += 3
+                        st.rerun()
+
+                new_comment = st.text_input("新增評論...", key=f"comment_{selected_loc_name}_{selected_loc['floor']}",
+                                            max_chars=100)
+                if st.button("送出評論", use_container_width=True):
+                    if new_comment.strip():
+                        new_c = {
+                            "text": new_comment,
+                            "time": datetime.now(TZ_TW).strftime("%Y/%m/%d %H:%M:%S"),
+                            "upvotes": 0,
+                            "downvotes": 0,
+                            "author": current_user
+                        }
+                        selected_loc['comments'].append(new_c)
+                        add_comment(selected_loc['id'], new_c)
+                        st.session_state[limit_key] = len(selected_loc['comments'])
+                        st.rerun()
+
+            with tab_photo:
+                if selected_loc.get('image'):
+                    st.image(selected_loc['image'], use_container_width=True)
                 update_img_file = st.file_uploader(
                     "選擇圖片", type=["jpg", "png", "jpeg"],
                     key=f"upload_img_{selected_loc_name}_{selected_loc['floor']}"
                 )
-                if st.button("送出圖片", key=f"btn_update_img_{selected_loc_name}_{selected_loc['floor']}", use_container_width=True):
+                if st.button("送出圖片", key=f"btn_update_img_{selected_loc_name}_{selected_loc['floor']}",
+                             use_container_width=True):
                     if update_img_file:
                         image_bytes = update_img_file.read()
                         url = upload_image(selected_loc['id'], image_bytes, update_img_file.name)
@@ -526,80 +603,6 @@ def main_app():
                     else:
                         st.warning("請先選擇要上傳的圖片檔案！")
 
-            st.markdown("##### 💬 留言評論")
-            
-            limit_key = f"comment_limit_{selected_loc['id']}"
-            if limit_key not in st.session_state:
-                st.session_state[limit_key] = 3
-                
-            current_limit = st.session_state[limit_key]
-            total_comments = len(selected_loc['comments'])
-            current_user = st.session_state.get("verify_email", "guest")
-
-            for i in range(min(total_comments, current_limit)):
-                c = selected_loc['comments'][i]
-                if not isinstance(c, dict):
-                    c = {"text": c, "time": "未知", "upvotes": 0, "downvotes": 0, "author": "guest"}
-                    selected_loc['comments'][i] = c
-                
-                upvotes = c.get("upvotes", 0)
-                downvotes = c.get("downvotes", 0)
-                is_author = (c.get("author") == current_user) and (current_user != "guest")
-                
-                if is_author:
-                    col_text, col_up, col_down, col_del = st.columns([4, 1.2, 1.2, 0.8])
-                else:
-                    col_text, col_up, col_down = st.columns([5, 1.5, 1.5])
-                    
-                with col_text:
-                    st.write(f"- {c.get('text', '')}　*{c.get('time', '')}*")
-                with col_up:
-                    if st.button(f"👍 推 {upvotes}", key=f"up_{selected_loc['id']}_{i}"):
-                        vote_key = f"{selected_loc['id']}_comment_{c.get('time', i)}_{c.get('text', i)[:10]}"
-                        if vote_key not in st.session_state.comment_voted:
-                            vote_comment(selected_loc['id'], i, "upvote")
-                            c["upvotes"] = upvotes + 1
-                            st.session_state.comment_voted.add(vote_key)
-                            st.rerun()
-                        else:
-                            st.toast("⚠️ 你已經對這則評論投過票囉！")
-                with col_down:
-                    if st.button(f"👎 噓 {downvotes}", key=f"down_{selected_loc['id']}_{i}"):
-                        vote_key = f"{selected_loc['id']}_comment_{c.get('time', i)}_{c.get('text', i)[:10]}"
-                        if vote_key not in st.session_state.comment_voted:
-                            vote_comment(selected_loc['id'], i, "downvote")
-                            c["downvotes"] = downvotes + 1
-                            st.session_state.comment_voted.add(vote_key)
-                            st.rerun()
-                        else:
-                            st.toast("⚠️ 你已經對這則評論投過票囉！")
-                            
-                if is_author:
-                    with col_del:
-                        if st.button("🗑️", key=f"del_{selected_loc['id']}_{i}", help="刪除你的留言"):
-                            delete_comment(selected_loc['id'], i)
-                            selected_loc['comments'].pop(i) 
-                            st.rerun()
-
-            if total_comments > current_limit:
-                if st.button("🔽 看更多留言", use_container_width=True, key=f"btn_more_{selected_loc['id']}"):
-                    st.session_state[limit_key] += 3
-                    st.rerun()
-
-            new_comment = st.text_input("新增評論...", key=f"comment_{selected_loc_name}_{selected_loc['floor']}", max_chars=100)
-            if st.button("送出評論", use_container_width=True):
-                if new_comment.strip():
-                    new_c = {
-                        "text": new_comment,
-                        "time": datetime.now(TZ_TW).strftime("%Y/%m/%d %H:%M:%S"),
-                        "upvotes": 0,
-                        "downvotes": 0,
-                        "author": current_user
-                    }
-                    selected_loc['comments'].append(new_c)
-                    add_comment(selected_loc['id'], new_c)
-                    st.session_state[limit_key] = len(selected_loc['comments'])
-                    st.rerun()
         else:
             # 如果某個類別沒有地點時，預設顯示台大公館捷運站附近的座標
             gmap_btn_placeholder.link_button("🗺️ Google Maps", "https://www.google.com/maps/search/?api=1&query=25.0173,121.5397", use_container_width=True)
