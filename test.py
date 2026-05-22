@@ -111,15 +111,19 @@ def add_comment(location_id, comment):
 def upload_image(location_id, image_bytes, file_name):
     timestamp = int(datetime.now(TZ_TW).timestamp())
     file_path = f"{location_id}/{timestamp}_{file_name}"
+    
     client.storage.from_("location-images").upload(
         file_path,
         image_bytes,
-        {"content-type": "image/jpeg", "upsert": True}
+        # 請確保這一行長得跟下面一模一樣（不能有布林值 True）
+        {"content-type": "image/jpeg", "x-upsert": "true"} 
     )
+    
     url = client.storage.from_("location-images").get_public_url(file_path)
     client.table("locations").update(
         {"image_url": url}
     ).eq("id", location_id).execute()
+    
     return url
 
 # ==========================================
