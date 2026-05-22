@@ -51,6 +51,8 @@ def add_location(name, lat, lng, category, intro, floor="無"):
         "intro": intro,
         "floor": floor,
         "score": 0,
+        "upvotes": 0,     # 新增地點推數
+        "downvotes": 0,   # 新增地點噓數
         "crowdedness": "[]",
         "comments": "[]"
     }
@@ -100,29 +102,57 @@ def add_comment(location_id, comment_dict):
         {"comments": json.dumps(current_comments, ensure_ascii=False)}
     ).eq("id", location_id).execute()
 
-def vote_comment(location_id, comment_index, vote_type):
-    # 處理推/噓數的資料庫更新
+# --- 新增/修改：地點與留言的推噓邏輯 (支援取消與切換) ---
+def vote_location(location_id, action):
+    try:
+        loc = client.table("locations").select("upvotes, downvotes").eq("id", location_id).execute().data[0]
+        up = loc.get("upvotes") or 0
+        down = loc.get("downvotes") or 0
+        
+        if action == 'upvote': up += 1
+        elif action == 'downvote': down += 1
+        elif action == 'cancel_up': up -= 1
+        elif action == 'cancel_down': down -= 1
+        elif action == 'switch_to_up': up += 1; down -= 1
+        elif action == 'switch_to_down': down += 1; up -= 1
+            
+        up, down = max(0, up), max(0, down)
+        client.table("locations").update({"upvotes": up, "downvotes": down}).eq("id", location_id).execute()
+        return up, down
+    except Exception as e:
+        st.error("資料庫可能尚未新增 upvotes / downvotes 欄位！請至 Supabase 設定。")
+        return 0, 0
+
+def vote_comment(location_id, comment_index, action):
     location = client.table("locations").select("comments").eq("id", location_id).execute()
     current_comments = json.loads(location.data[0]["comments"])
     
     try:
         target = current_comments[comment_index]
-        # 相容舊版字串格式的留言
         if not isinstance(target, dict):
             target = {"text": target, "time": "未知", "upvotes": 0, "downvotes": 0}
             
-        if vote_type == "upvote":
-            target["upvotes"] = target.get("upvotes", 0) + 1
-        elif vote_type == "downvote":
-            target["downvotes"] = target.get("downvotes", 0) + 1
+        up = target.get("upvotes", 0)
+        down = target.get("downvotes", 0)
+        
+        if action == 'upvote': up += 1
+        elif action == 'downvote': down += 1
+        elif action == 'cancel_up': up -= 1
+        elif action == 'cancel_down': down -= 1
+        elif action == 'switch_to_up': up += 1; down -= 1
+        elif action == 'switch_to_down': down += 1; up -= 1
             
+        target["upvotes"] = max(0, up)
+        target["downvotes"] = max(0, down)
         current_comments[comment_index] = target
         
         client.table("locations").update(
             {"comments": json.dumps(current_comments, ensure_ascii=False)}
         ).eq("id", location_id).execute()
+        return target["upvotes"], target["downvotes"]
     except Exception:
-        pass
+        return 0, 0
+# ---------------------------------------------------
 
 def upload_image(location_id, image_bytes, file_name):
     timestamp = int(datetime.now(TZ_TW).timestamp())
@@ -176,29 +206,20 @@ ntu_polygon_coords = [
 ntu_campus_poly = Polygon(ntu_polygon_coords)
 folium_bounds = [(lat, lon) for lon, lat in ntu_polygon_coords]
 
-# 登入狀態與其他紀錄初始化
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-if 'user_role' not in st.session_state:
-    st.session_state.user_role = None
-if 'current_category' not in st.session_state:
-    st.session_state.current_category = "充電"
-if 'waiting_verify' not in st.session_state:
-    st.session_state.waiting_verify = False
-if 'pending_lat' not in st.session_state:
-    st.session_state.pending_lat = None
-if 'pending_lon' not in st.session_state:
-    st.session_state.pending_lon = None
-if 'pending_name' not in st.session_state:
-    st.session_state.pending_name = None
-if 'pending_floor' not in st.session_state:
-    st.session_state.pending_floor = "無"
-if 'pending_desc' not in st.session_state:
-    st.session_state.pending_desc = ""
-if 'crowd_voted' not in st.session_state:
-    st.session_state.crowd_voted = {}
-if 'comment_voted' not in st.session_state:
-    st.session_state.comment_voted = set()
+# 登入狀態與投票紀錄初始化
+if 'logged_in' not in st.session_state: st.session_state.logged_in = False
+if 'user_role' not in st.session_state: st.session_state.user_role = None
+if 'current_category' not in st.session_state: st.session_state.current_category = "充電"
+if 'waiting_verify' not in st.session_state: st.session_state.waiting_verify = False
+if 'pending_lat' not in st.session_state: st.session_state.pending_lat = None
+if 'pending_lon' not in st.session_state: st.session_state.pending_lon = None
+if 'pending_name' not in st.session_state: st.session_state.pending_name = None
+if 'pending_floor' not in st.session_state: st.session_state.pending_floor = "無"
+if 'pending_desc' not in st.session_state: st.session_state.pending_desc = ""
+
+if 'crowd_voted' not in st.session_state: st.session_state.crowd_voted = {}
+if 'loc_votes' not in st.session_state: st.session_state.loc_votes = {}         # 地點投票狀態: 'up' 或 'down'
+if 'comment_votes' not in st.session_state: st.session_state.comment_votes = {} # 留言投票狀態: 'up' 或 'down'
 
 # 從資料庫讀取地點
 if 'locations' not in st.session_state:
@@ -215,6 +236,8 @@ if 'locations' not in st.session_state:
                 "floor": loc.get("floor") or "無",
                 "lat": loc["lat"],
                 "lon": loc["lng"],
+                "upvotes": loc.get("upvotes", 0),       # 讀取地點推數
+                "downvotes": loc.get("downvotes", 0),   # 讀取地點噓數
                 "crowd": get_recent_crowd(loc.get("crowdedness", "[]")),
                 "comments": json.loads(loc.get("comments", "[]")),
                 "desc": loc.get("intro", ""),
@@ -280,15 +303,13 @@ def main_app():
     col_title.title("🗺️ 臺大校園地圖指南")
     
     if col_refresh.button("🔄 更新地圖資料", use_container_width=True):
-        if "locations" in st.session_state:
-            del st.session_state["locations"]
+        if "locations" in st.session_state: del st.session_state["locations"]
         st.rerun()
 
     if col_logout.button("登出", use_container_width=True):
         st.session_state.logged_in = False
         st.session_state.user_role = None
-        if "locations" in st.session_state:
-            del st.session_state["locations"]
+        if "locations" in st.session_state: del st.session_state["locations"]
         st.rerun()
 
     if st.session_state.user_role == "student":
@@ -354,13 +375,10 @@ def main_app():
 
         map_data = st_folium(m, height=450, use_container_width=True)
 
-        clicked_lat, clicked_lon = None, None
         if map_data.get("last_clicked"):
-            clicked_lat = map_data["last_clicked"]["lat"]
-            clicked_lon = map_data["last_clicked"]["lng"]
-            st.session_state.pending_lat = clicked_lat
-            st.session_state.pending_lon = clicked_lon
-            st.info(f"📍 獲取地圖座標: 緯度 {clicked_lat:.5f}, 經度 {clicked_lon:.5f}")
+            st.session_state.pending_lat = map_data["last_clicked"]["lat"]
+            st.session_state.pending_lon = map_data["last_clicked"]["lng"]
+            st.info(f"📍 獲取地圖座標: 緯度 {st.session_state.pending_lat:.5f}, 經度 {st.session_state.pending_lon:.5f}")
 
     with col_details:
         st.markdown("#### 🏢 地點互動")
@@ -375,17 +393,17 @@ def main_app():
             else:
                 floor_names = [f"樓層：{f['floor']}" for f in floors_data]
                 selected_floor_idx = st.selectbox(
-                    "選擇樓層：",
-                    range(len(floor_names)),
-                    format_func=lambda x: floor_names[x]
+                    "選擇樓層：", range(len(floor_names)), format_func=lambda x: floor_names[x]
                 )
             selected_loc = floors_data[selected_floor_idx]
 
-            # 即時從資料庫拉取最新擁擠度
+            # 即時從資料庫拉取最新擁擠度與地點推噓數
             try:
-                fresh_db = client.table("locations").select("crowdedness").eq("id", selected_loc['id']).execute()
+                fresh_db = client.table("locations").select("crowdedness, upvotes, downvotes").eq("id", selected_loc['id']).execute()
                 if fresh_db.data:
                     selected_loc['crowd'] = get_recent_crowd(fresh_db.data[0]["crowdedness"])
+                    selected_loc['upvotes'] = fresh_db.data[0]["upvotes"] or 0
+                    selected_loc['downvotes'] = fresh_db.data[0]["downvotes"] or 0
             except Exception:
                 pass
 
@@ -394,6 +412,40 @@ def main_app():
 
             st.write(f"**介紹：** {selected_loc.get('desc', '無')}")
             
+            # ---------------- 地點推噓功能 ----------------
+            loc_vote_state = st.session_state.loc_votes.get(selected_loc['id'])
+            col_lup, col_ldown, _ = st.columns([1.5, 1.5, 3])
+            
+            with col_lup:
+                lbl_up = f"👍 推 {selected_loc.get('upvotes', 0)}" + (" (已推)" if loc_vote_state == 'up' else "")
+                if st.button(lbl_up, key=f"loc_up_{selected_loc['id']}", use_container_width=True):
+                    if loc_vote_state == 'up':  # 取消推
+                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'], 'cancel_up')
+                        del st.session_state.loc_votes[selected_loc['id']]
+                    elif loc_vote_state == 'down': # 從噓切換到推
+                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'], 'switch_to_up')
+                        st.session_state.loc_votes[selected_loc['id']] = 'up'
+                    else: # 全新推
+                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'], 'upvote')
+                        st.session_state.loc_votes[selected_loc['id']] = 'up'
+                    st.rerun()
+
+            with col_ldown:
+                lbl_down = f"👎 噓 {selected_loc.get('downvotes', 0)}" + (" (已噓)" if loc_vote_state == 'down' else "")
+                if st.button(lbl_down, key=f"loc_down_{selected_loc['id']}", use_container_width=True):
+                    if loc_vote_state == 'down': # 取消噓
+                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'], 'cancel_down')
+                        del st.session_state.loc_votes[selected_loc['id']]
+                    elif loc_vote_state == 'up': # 從推切換到噓
+                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'], 'switch_to_down')
+                        st.session_state.loc_votes[selected_loc['id']] = 'down'
+                    else: # 全新噓
+                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'], 'downvote')
+                        st.session_state.loc_votes[selected_loc['id']] = 'down'
+                    st.rerun()
+            st.divider()
+            # ----------------------------------------------
+
             display_crowd = f"{selected_loc['crowd']} / 5" if selected_loc['crowd'] != "待回報" else "待回報 / 5"
             st.write(f"**平均擁擠程度（1為最不擁擠)：** {display_crowd}")
 
@@ -436,41 +488,47 @@ def main_app():
                     else:
                         st.warning("請先選擇要上傳的圖片檔案！")
 
-            # 功能 3: 留言評論 (已加入推/噓功能)
+            # 功能 3: 留言評論 (含取消與切換邏輯)
             st.markdown("##### 💬 留言評論")
             for i, c in enumerate(selected_loc['comments']):
-                # 處理舊版格式，讓它自動升級
                 if not isinstance(c, dict):
                     c = {"text": c, "time": "未知", "upvotes": 0, "downvotes": 0}
                     selected_loc['comments'][i] = c
                 
-                upvotes = c.get("upvotes", 0)
-                downvotes = c.get("downvotes", 0)
+                comment_key = f"{selected_loc['id']}_comment_{i}"
+                user_c_vote = st.session_state.comment_votes.get(comment_key)
                 
-                # 將文字與兩個按鈕切分為不同比例的區塊
-                col_text, col_up, col_down = st.columns([5, 1.5, 1.5])
+                col_text, col_up, col_down = st.columns([4, 2, 2])
                 with col_text:
                     st.write(f"- {c.get('text', '')}　*{c.get('time', '')}*")
+                
                 with col_up:
-                    if st.button(f"👍 推 {upvotes}", key=f"up_{selected_loc['id']}_{i}"):
-                        vote_key = f"{selected_loc['id']}_comment_{i}"
-                        if vote_key not in st.session_state.comment_voted:
-                            vote_comment(selected_loc['id'], i, "upvote")
-                            c["upvotes"] = upvotes + 1
-                            st.session_state.comment_voted.add(vote_key)
-                            st.rerun()
+                    btn_up_lbl = f"👍 推 {c.get('upvotes', 0)}" + (" (已推)" if user_c_vote == 'up' else "")
+                    if st.button(btn_up_lbl, key=f"up_{selected_loc['id']}_{i}", use_container_width=True):
+                        if user_c_vote == 'up':
+                            c['upvotes'], c['downvotes'] = vote_comment(selected_loc['id'], i, 'cancel_up')
+                            del st.session_state.comment_votes[comment_key]
+                        elif user_c_vote == 'down':
+                            c['upvotes'], c['downvotes'] = vote_comment(selected_loc['id'], i, 'switch_to_up')
+                            st.session_state.comment_votes[comment_key] = 'up'
                         else:
-                            st.toast("⚠️ 你已經對這則評論投過票囉！")
+                            c['upvotes'], c['downvotes'] = vote_comment(selected_loc['id'], i, 'upvote')
+                            st.session_state.comment_votes[comment_key] = 'up'
+                        st.rerun()
+                        
                 with col_down:
-                    if st.button(f"👎 噓 {downvotes}", key=f"down_{selected_loc['id']}_{i}"):
-                        vote_key = f"{selected_loc['id']}_comment_{i}"
-                        if vote_key not in st.session_state.comment_voted:
-                            vote_comment(selected_loc['id'], i, "downvote")
-                            c["downvotes"] = downvotes + 1
-                            st.session_state.comment_voted.add(vote_key)
-                            st.rerun()
+                    btn_down_lbl = f"👎 噓 {c.get('downvotes', 0)}" + (" (已噓)" if user_c_vote == 'down' else "")
+                    if st.button(btn_down_lbl, key=f"down_{selected_loc['id']}_{i}", use_container_width=True):
+                        if user_c_vote == 'down':
+                            c['upvotes'], c['downvotes'] = vote_comment(selected_loc['id'], i, 'cancel_down')
+                            del st.session_state.comment_votes[comment_key]
+                        elif user_c_vote == 'up':
+                            c['upvotes'], c['downvotes'] = vote_comment(selected_loc['id'], i, 'switch_to_down')
+                            st.session_state.comment_votes[comment_key] = 'down'
                         else:
-                            st.toast("⚠️ 你已經對這則評論投過票囉！")
+                            c['upvotes'], c['downvotes'] = vote_comment(selected_loc['id'], i, 'downvote')
+                            st.session_state.comment_votes[comment_key] = 'down'
+                        st.rerun()
 
             new_comment = st.text_input("新增評論...", key=f"comment_{selected_loc_name}_{selected_loc['floor']}", max_chars=100)
             if st.button("送出評論", use_container_width=True):
@@ -507,10 +565,8 @@ def main_app():
                         st.warning("請先在地圖上點擊要新增的位置")
 
                     if st.button("新增此地點", type="primary", use_container_width=True):
-                        if not new_name.strip():
-                            st.error("請輸入地點名稱！")
-                        elif not st.session_state.pending_lat:
-                            st.error("請先在地圖上點擊你要新增的位置！")
+                        if not new_name.strip(): st.error("請輸入地點名稱！")
+                        elif not st.session_state.pending_lat: st.error("請先在地圖上點擊你要新增的位置！")
                         elif new_name in st.session_state.locations[st.session_state.current_category]:
                             st.error(f"「{new_name}」已存在！如果要新增樓層，請選擇「現有地點的新樓層」。")
                         else:
@@ -533,6 +589,8 @@ def main_app():
                                     "floor": st.session_state.pending_floor,
                                     "lat": st.session_state.pending_lat,
                                     "lon": st.session_state.pending_lon,
+                                    "upvotes": 0,
+                                    "downvotes": 0,
                                     "crowd": "待回報",
                                     "comments": [],
                                     "desc": st.session_state.pending_desc,
@@ -541,8 +599,7 @@ def main_app():
                                 st.toast(f"✅ 成功新增地點：{p_name}！", icon="✅")
                                 st.session_state.pending_lat = None
                                 st.session_state.pending_lon = None
-                                import time
-                                time.sleep(1)
+                                import time; time.sleep(1)
                                 st.rerun()
                             else:
                                 st.error("⚠️該座標不在臺大校總區範圍內，無法新增！")
@@ -587,14 +644,15 @@ def main_app():
                                         "floor": st.session_state.pending_floor,
                                         "lat": existing_lat,
                                         "lon": existing_lon,
+                                        "upvotes": 0,
+                                        "downvotes": 0,
                                         "crowd": "待回報",
                                         "comments": [],
                                         "desc": st.session_state.pending_desc,
                                         "image": None
                                     })
                                 st.toast(f"✅ 已新增 {selected_existing} {new_floor} 樓！", icon="✅")
-                                import time
-                                time.sleep(1)
+                                import time; time.sleep(1)
                                 st.rerun()
 
 # ==========================================
