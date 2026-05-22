@@ -105,6 +105,18 @@ def add_comment(location_id, comment_dict):
         {"comments": json.dumps(current_comments, ensure_ascii=False)}
     ).eq("id", location_id).execute()
 
+# 新增：刪除評論函式
+def delete_comment(location_id, comment_index):
+    location = client.table("locations").select("comments").eq("id", location_id).execute()
+    current_comments = json.loads(location.data[0]["comments"])
+    try:
+        current_comments.pop(comment_index)
+        client.table("locations").update(
+            {"comments": json.dumps(current_comments, ensure_ascii=False)}
+        ).eq("id", location_id).execute()
+    except Exception:
+        pass
+
 def vote_comment(location_id, comment_index, vote_type):
     location = client.table("locations").select("comments").eq("id", location_id).execute()
     current_comments = json.loads(location.data[0]["comments"])
@@ -112,7 +124,7 @@ def vote_comment(location_id, comment_index, vote_type):
     try:
         target = current_comments[comment_index]
         if not isinstance(target, dict):
-            target = {"text": target, "time": "未知", "upvotes": 0, "downvotes": 0}
+            target = {"text": target, "time": "未知", "upvotes": 0, "downvotes": 0, "author": "guest"}
             
         if vote_type == "upvote":
             target["upvotes"] = target.get("upvotes", 0) + 1
@@ -279,9 +291,12 @@ def login_page():
 # 3. 主應用程式
 # ==========================================
 def main_app():
-    col_title, col_refresh, col_logout = st.columns([3, 1, 1])
+    # 頂端增加 Google Maps 快速連結按鈕
+    col_title, col_gmap, col_refresh, col_logout = st.columns([2.5, 1.5, 1.5, 1])
     col_title.title("🗺️ 臺大校園地圖指南")
     
+    col_gmap.link_button("🗺️ Google Maps", "https://maps.google.com/?q=國立臺灣大學", use_container_width=True)
+
     if col_refresh.button("🔄 更新地圖資料", use_container_width=True):
         if "locations" in st.session_state:
             del st.session_state["locations"]
@@ -384,7 +399,6 @@ def main_app():
                 )
             selected_loc = floors_data[selected_floor_idx]
 
-            # 即時從資料庫拉取最新擁擠度
             try:
                 fresh_db = client.table("locations").select("crowdedness").eq("id", selected_loc['id']).execute()
                 if fresh_db.data:
@@ -397,15 +411,10 @@ def main_app():
 
             st.write(f"**介紹：** {selected_loc.get('desc', '無')}")
             
+            # --- 修改版面：將回報按鈕直接貼在擁擠度文字下方 ---
             display_crowd = f"{selected_loc['crowd']} / 5" if selected_loc['crowd'] != "待回報" else "待回報 / 5"
             st.write(f"**平均擁擠程度（1為最不擁擠)：** {display_crowd}")
 
-            # --- 新增 Google Maps 導航按鈕 ---
-            google_maps_url = f"https://www.google.com/maps/dir/?api=1&destination={selected_loc['lat']},{selected_loc['lon']}"
-            st.link_button("🗺️ 使用 Google Maps 導航至此", google_maps_url, use_container_width=True)
-            # -------------------------------
-
-            st.write("回報擁擠狀況：")
             if st.session_state.user_role == "student":
                 crowd_cols = st.columns(5)
                 loc_key = f"{selected_loc['id']}"
@@ -428,6 +437,7 @@ def main_app():
                             st.rerun()
             else:
                 st.caption("請登入台大信箱才能回報擁擠度")
+            # ------------------------------------------------
 
             with st.expander("📷 上傳或更新此地點的圖片"):
                 update_img_file = st.file_uploader(
@@ -444,7 +454,7 @@ def main_app():
                     else:
                         st.warning("請先選擇要上傳的圖片檔案！")
 
-            # 功能 3: 留言評論 (加入分頁/看更多功能)
+            # --- 功能 3: 留言評論 (加入刪除功能) ---
             st.markdown("##### 💬 留言評論")
             
             limit_key = f"comment_limit_{selected_loc['id']}"
@@ -453,17 +463,28 @@ def main_app():
                 
             current_limit = st.session_state[limit_key]
             total_comments = len(selected_loc['comments'])
+            
+            # 取得當前使用者的 Email (訪客則為 guest)
+            current_user = st.session_state.get("verify_email", "guest")
 
             for i in range(min(total_comments, current_limit)):
                 c = selected_loc['comments'][i]
                 if not isinstance(c, dict):
-                    c = {"text": c, "time": "未知", "upvotes": 0, "downvotes": 0}
+                    c = {"text": c, "time": "未知", "upvotes": 0, "downvotes": 0, "author": "guest"}
                     selected_loc['comments'][i] = c
                 
                 upvotes = c.get("upvotes", 0)
                 downvotes = c.get("downvotes", 0)
                 
-                col_text, col_up, col_down = st.columns([5, 1.5, 1.5])
+                # 判斷這則留言是否為當前使用者發的 (且不能是訪客)
+                is_author = (c.get("author") == current_user) and (current_user != "guest")
+                
+                if is_author:
+                    # 若為自己的留言，多切出一個刪除按鈕的空間
+                    col_text, col_up, col_down, col_del = st.columns([4, 1.2, 1.2, 0.8])
+                else:
+                    col_text, col_up, col_down = st.columns([5, 1.5, 1.5])
+                    
                 with col_text:
                     st.write(f"- {c.get('text', '')}　*{c.get('time', '')}*")
                 with col_up:
@@ -486,6 +507,14 @@ def main_app():
                             st.rerun()
                         else:
                             st.toast("⚠️ 你已經對這則評論投過票囉！")
+                            
+                # 如果是作者，渲染刪除按鈕
+                if is_author:
+                    with col_del:
+                        if st.button("🗑️", key=f"del_{selected_loc['id']}_{i}", help="刪除你的留言"):
+                            delete_comment(selected_loc['id'], i)
+                            selected_loc['comments'].pop(i) # 同步刪除本地暫存
+                            st.rerun()
 
             if total_comments > current_limit:
                 if st.button("🔽 看更多留言", use_container_width=True, key=f"btn_more_{selected_loc['id']}"):
@@ -499,7 +528,8 @@ def main_app():
                         "text": new_comment,
                         "time": datetime.now(TZ_TW).strftime("%Y/%m/%d %H:%M"),
                         "upvotes": 0,
-                        "downvotes": 0
+                        "downvotes": 0,
+                        "author": current_user # 記錄發言者身分
                     }
                     selected_loc['comments'].append(new_c)
                     add_comment(selected_loc['id'], new_c)
@@ -511,7 +541,6 @@ def main_app():
         # 新增/修改地點功能 (僅限學生)
         if st.session_state.user_role == "student":
             
-            # --- 新增地點面板 ---
             with st.expander("➕ 新增地點"):
                 add_mode = st.radio("新增方式：", ["新地點", "現有地點的新樓層"], key="add_mode")
 
@@ -620,7 +649,6 @@ def main_app():
                                 time.sleep(1)
                                 st.rerun()
             
-            # --- 修改座標面板 ---
             with st.expander("📍 修改地點座標"):
                 st.write("請先在左側地圖點擊新的位置，然後選擇要修改的地點。")
                 existing_names = list(st.session_state.locations[st.session_state.current_category].keys())
