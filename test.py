@@ -452,10 +452,12 @@ def main_app():
             except Exception:
                 pass
 
-            tab_info, tab_comments, tab_photo = st.tabs(["📍 資訊與擁擠度", "💬 留言評論", "📷 新增照片"])
+            tab_info, tab_comments, tab_photo = st.tabs(["📍 資訊與擁擠度", "💬 留言評論", "📷 照片"])
 
             with tab_info:
-
+                loc_images = selected_loc.get('images', [])
+                if loc_images:
+                    st.image(loc_images[0], use_container_width=True)
                 st.write(f"**介紹：** {selected_loc.get('desc', '無')}")
 
                 loc_vote_state = st.session_state.loc_votes.get(selected_loc['id'])
