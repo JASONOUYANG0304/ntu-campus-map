@@ -50,7 +50,6 @@ def add_location(name, lat, lng, category, intro, floor="無"):
         "category": category,
         "intro": intro,
         "floor": floor,
-        "score": 0,
         "crowdedness": "[]",
         "comments": "[]"
     }
@@ -397,7 +396,7 @@ def main_app():
             selected_loc = floors_data[selected_floor_idx]
 
             # --- 動態插入 Google Maps 按鈕 ---
-            gmap_url = f"https://www.google.com/maps/search/?api=1&query={selected_loc['lat']},{selected_loc['lon']}"
+            gmap_url = f"https://www.google.com/maps/dir/?api=1&destination={selected_loc['lat']},{selected_loc['lon']}"
             gmap_btn_placeholder.link_button("🗺️ Google Maps", gmap_url, use_container_width=True)
             # ---------------------------------
 
