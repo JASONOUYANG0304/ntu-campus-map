@@ -108,17 +108,23 @@ def add_comment(location_id, comment):
         {"comments": json.dumps(current_comments, ensure_ascii=False)}
     ).eq("id", location_id).execute()
 
-def upload_image(location_id, image_bytes, file_name):
+ddef upload_image(location_id, image_bytes, file_name):
     timestamp = int(datetime.now(TZ_TW).timestamp())
     file_path = f"{location_id}/{timestamp}_{file_name}"
     
-    client.storage.from_("location-images").upload(
-        file_path,
-        image_bytes,
-        # 請確保這一行長得跟下面一模一樣（不能有布林值 True）
-        {"content-type": "image/jpeg", "x-upsert": "true"} 
-    )
+    try:
+        # 嘗試上傳
+        client.storage.from_("location-images").upload(
+            file_path,
+            image_bytes,
+            {"content-type": "image/jpeg", "x-upsert": "true"} 
+        )
+    except Exception as e:
+        # 如果 Supabase 拒絕，把真正的錯誤訊息顯示在 Streamlit 畫面上
+        st.error(f"❌ Supabase 拒絕上傳，錯誤原因：{str(e)}")
+        st.stop() # 暫停程式往下執行
     
+    # 如果成功，繼續更新資料庫
     url = client.storage.from_("location-images").get_public_url(file_path)
     client.table("locations").update(
         {"image_url": url}
