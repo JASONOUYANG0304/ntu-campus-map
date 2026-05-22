@@ -109,21 +109,29 @@ def add_comment(location_id, comment):
     ).eq("id", location_id).execute()
 
 def upload_image(location_id, image_bytes, file_name):
+    # 取得當下時間戳 (純數字)
     timestamp = int(datetime.now(TZ_TW).timestamp())
-    file_path = f"{location_id}/{timestamp}_{file_name}"
+    
+    # 解決檔名包含中文或空白導致 InvalidKey 的問題
+    # os.path.splitext 會把 "截圖 123.png" 拆成 ("截圖 123", ".png")，我們只要後面的 ".png"
+    ext = os.path.splitext(file_name)[1] 
+    
+    # 產生安全的新路徑，例如：5/1779422725.png
+    safe_file_path = f"{location_id}/{timestamp}{ext}"
     
     try:
+        # 嘗試上傳
         client.storage.from_("location-images").upload(
-            file_path,
+            safe_file_path,
             image_bytes,
-            # 請確保這一行是 "x-upsert": "true" (必須是字串的 "true")
-            {"content-type": "image/jpeg", "x-upsert": "true"} 
+            {"content-type": f"image/{ext.replace('.', '')}", "x-upsert": "true"} 
         )
     except Exception as e:
         st.error(f"❌ Supabase 拒絕上傳，錯誤原因：{str(e)}")
         st.stop()
     
-    url = client.storage.from_("location-images").get_public_url(file_path)
+    # 如果成功，繼續更新資料庫
+    url = client.storage.from_("location-images").get_public_url(safe_file_path)
     client.table("locations").update(
         {"image_url": url}
     ).eq("id", location_id).execute()
