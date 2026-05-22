@@ -142,22 +142,36 @@ def vote_location(location_id, action):
     except Exception:
         return 0, 0
 
+
 def vote_comment(location_id, comment_index, vote_type):
     location = client.table("locations").select("comments").eq("id", location_id).execute()
     current_comments = json.loads(location.data[0]["comments"])
-    
+
     try:
         target = current_comments[comment_index]
         if not isinstance(target, dict):
             target = {"text": target, "time": "未知", "upvotes": 0, "downvotes": 0, "author": "guest"}
-            
+
+        up = target.get("upvotes", 0)
+        down = target.get("downvotes", 0)
+
         if vote_type == "upvote":
-            target["upvotes"] = target.get("upvotes", 0) + 1
+            up += 1
         elif vote_type == "downvote":
-            target["downvotes"] = target.get("downvotes", 0) + 1
-            
+            down += 1
+        elif vote_type == "cancel_up":
+            up -= 1
+        elif vote_type == "cancel_down":
+            down -= 1
+        elif vote_type == "switch_to_up":
+            up += 1; down -= 1
+        elif vote_type == "switch_to_down":
+            down += 1; up -= 1
+
+        target["upvotes"] = max(0, up)
+        target["downvotes"] = max(0, down)
         current_comments[comment_index] = target
-        
+
         client.table("locations").update(
             {"comments": json.dumps(current_comments, ensure_ascii=False)}
         ).eq("id", location_id).execute()
@@ -251,8 +265,8 @@ if 'crowd_voted' not in st.session_state:
     st.session_state.crowd_voted = {}
 if 'loc_votes' not in st.session_state:
     st.session_state.loc_votes = {}
-if 'comment_voted' not in st.session_state:
-    st.session_state.comment_voted = set()
+if 'comment_votes' not in st.session_state:
+    st.session_state.comment_votes = {}
 
 if 'locations' not in st.session_state:
     raw = get_all_locations()
@@ -551,25 +565,44 @@ def main_app():
                     with col_text:
                         st.write(f"- {c.get('text', '')}　*{c.get('time', '')}*")
                     with col_up:
-                        if st.button(f"👍 推 {upvotes}", key=f"up_{selected_loc['id']}_{i}"):
-                            vote_key = f"{selected_loc['id']}_comment_{c.get('time', i)}_{c.get('text', i)[:10]}"
-                            if vote_key not in st.session_state.comment_voted:
+                        vote_key = f"{selected_loc['id']}_comment_{c.get('time', i)}_{c.get('text', i)[:10]}"
+                        user_vote = st.session_state.comment_votes.get(vote_key)
+                        btn_lbl_up = f"👍 推 {upvotes}" + (" ✓" if user_vote == 'up' else "")
+                        if st.button(btn_lbl_up, key=f"up_{selected_loc['id']}_{i}"):
+                            if user_vote == 'up':
+                                vote_comment(selected_loc['id'], i, "cancel_up")
+                                c["upvotes"] = max(0, upvotes - 1)
+                                del st.session_state.comment_votes[vote_key]
+                            elif user_vote == 'down':
+                                vote_comment(selected_loc['id'], i, "switch_to_up")
+                                c["upvotes"] = upvotes + 1
+                                c["downvotes"] = max(0, downvotes - 1)
+                                st.session_state.comment_votes[vote_key] = 'up'
+                            else:
                                 vote_comment(selected_loc['id'], i, "upvote")
                                 c["upvotes"] = upvotes + 1
-                                st.session_state.comment_voted.add(vote_key)
-                                st.rerun()
-                            else:
-                                st.toast("⚠️ 你已經對這則評論投過票囉！")
+                                st.session_state.comment_votes[vote_key] = 'up'
+                            st.rerun()
+
                     with col_down:
-                        if st.button(f"👎 噓 {downvotes}", key=f"down_{selected_loc['id']}_{i}"):
-                            vote_key = f"{selected_loc['id']}_comment_{c.get('time', i)}_{c.get('text', i)[:10]}"
-                            if vote_key not in st.session_state.comment_voted:
+                        vote_key = f"{selected_loc['id']}_comment_{c.get('time', i)}_{c.get('text', i)[:10]}"
+                        user_vote = st.session_state.comment_votes.get(vote_key)
+                        btn_lbl_down = f"👎 噓 {downvotes}" + (" ✓" if user_vote == 'down' else "")
+                        if st.button(btn_lbl_down, key=f"down_{selected_loc['id']}_{i}"):
+                            if user_vote == 'down':
+                                vote_comment(selected_loc['id'], i, "cancel_down")
+                                c["downvotes"] = max(0, downvotes - 1)
+                                del st.session_state.comment_votes[vote_key]
+                            elif user_vote == 'up':
+                                vote_comment(selected_loc['id'], i, "switch_to_down")
+                                c["downvotes"] = downvotes + 1
+                                c["upvotes"] = max(0, upvotes - 1)
+                                st.session_state.comment_votes[vote_key] = 'down'
+                            else:
                                 vote_comment(selected_loc['id'], i, "downvote")
                                 c["downvotes"] = downvotes + 1
-                                st.session_state.comment_voted.add(vote_key)
-                                st.rerun()
-                            else:
-                                st.toast("⚠️ 你已經對這則評論投過票囉！")
+                                st.session_state.comment_votes[vote_key] = 'down'
+                            st.rerun()
                     if is_author:
                         with col_del:
                             if st.button("🗑️", key=f"del_{selected_loc['id']}_{i}", help="刪除你的留言"):
