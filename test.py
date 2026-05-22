@@ -535,6 +535,8 @@ def main_app():
                                 new_display = f"{selected_loc['crowd']} / 5" if selected_loc[
                                                                                     'crowd'] != "待回報" else "待回報 / 5"
                                 st.success(f"已更新！目前平均擁擠度：{new_display}")
+                                import time
+                                time.sleep(1)
                                 st.rerun()
                 else:
                     st.caption("請登入台大信箱才能回報擁擠度")
@@ -649,6 +651,8 @@ def main_app():
                                     ).eq("id", selected_loc['id']).execute()
                                     selected_loc['images'] = loc_images
                                     st.toast("✅ 照片已刪除！", icon="✅")
+                                    import time
+                                    time.sleep(1)
                                     st.rerun()
                 else:
                     st.info("目前還沒有照片，來當第一個上傳的人吧！")
@@ -667,6 +671,8 @@ def main_app():
                             new_image_list = upload_image(selected_loc['id'], image_bytes, update_img_file.name)
                             selected_loc['images'] = new_image_list
                         st.toast("✅ 照片新增成功！", icon="🎉")
+                        import time
+                        time.sleep(1)
                         st.rerun()
                     else:
                         st.warning("請先選擇要上傳的圖片檔案！")
