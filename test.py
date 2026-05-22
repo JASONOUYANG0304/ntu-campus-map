@@ -35,7 +35,6 @@ client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TZ_TW = timezone(timedelta(hours=8))
 
 def get_all_locations():
-    # 讀取所有地點
     try:
         response = client.table("locations").select("*").execute()
         return response.data
@@ -44,7 +43,6 @@ def get_all_locations():
         return []
 
 def add_location(name, lat, lng, category, intro, floor="無"):
-    # 新增一個地點
     data = {
         "name": name,
         "lat": lat,
@@ -64,16 +62,13 @@ def update_crowdedness(location_id, value):
     raw = json.loads(location.data[0]["crowdedness"] or "[]")
     current = raw if isinstance(raw, list) else [raw]
 
-    # 轉成新格式並過濾超過一小時的資料
     one_hour_ago = datetime.now(TZ_TW) - timedelta(hours=1)
     converted = []
     for item in current:
         if isinstance(item, dict):
             if datetime.fromisoformat(item["time"]) > one_hour_ago:
                 converted.append(item)
-        # 純數字格式視為過期，直接丟掉
 
-    # 新增這次的回報
     converted.append({
         "value": value,
         "time": datetime.now(TZ_TW).isoformat()
@@ -97,30 +92,44 @@ def get_recent_crowd(crowdedness_json):
     except:
         return "待回報"
 
-def add_comment(location_id, comment):
+def add_comment(location_id, comment_dict):
     location = client.table("locations").select("comments").eq("id", location_id).execute()
     current_comments = json.loads(location.data[0]["comments"])
-    current_comments.append({
-        "text": comment,
-        "time": datetime.now(TZ_TW).strftime("%Y/%m/%d %H:%M")
-    })
+    current_comments.append(comment_dict)
     client.table("locations").update(
         {"comments": json.dumps(current_comments, ensure_ascii=False)}
     ).eq("id", location_id).execute()
 
+def vote_comment(location_id, comment_index, vote_type):
+    # 處理推/噓數的資料庫更新
+    location = client.table("locations").select("comments").eq("id", location_id).execute()
+    current_comments = json.loads(location.data[0]["comments"])
+    
+    try:
+        target = current_comments[comment_index]
+        # 相容舊版字串格式的留言
+        if not isinstance(target, dict):
+            target = {"text": target, "time": "未知", "upvotes": 0, "downvotes": 0}
+            
+        if vote_type == "upvote":
+            target["upvotes"] = target.get("upvotes", 0) + 1
+        elif vote_type == "downvote":
+            target["downvotes"] = target.get("downvotes", 0) + 1
+            
+        current_comments[comment_index] = target
+        
+        client.table("locations").update(
+            {"comments": json.dumps(current_comments, ensure_ascii=False)}
+        ).eq("id", location_id).execute()
+    except Exception:
+        pass
+
 def upload_image(location_id, image_bytes, file_name):
-    # 取得當下時間戳 (純數字)
     timestamp = int(datetime.now(TZ_TW).timestamp())
-    
-    # 解決檔名包含中文或空白導致 InvalidKey 的問題
-    # os.path.splitext 會把 "截圖 123.png" 拆成 ("截圖 123", ".png")，我們只要後面的 ".png"
     ext = os.path.splitext(file_name)[1] 
-    
-    # 產生安全的新路徑，例如：5/1779422725.png
     safe_file_path = f"{location_id}/{timestamp}{ext}"
     
     try:
-        # 嘗試上傳
         client.storage.from_("location-images").upload(
             safe_file_path,
             image_bytes,
@@ -130,7 +139,6 @@ def upload_image(location_id, image_bytes, file_name):
         st.error(f"❌ Supabase 拒絕上傳，錯誤原因：{str(e)}")
         st.stop()
     
-    # 如果成功，繼續更新資料庫
     url = client.storage.from_("location-images").get_public_url(safe_file_path)
     client.table("locations").update(
         {"image_url": url}
@@ -142,20 +150,17 @@ def upload_image(location_id, image_bytes, file_name):
 # 驗證碼寄送
 # ==========================================
 def send_verification_code(target_email):
-    # 產生 6 位數驗證碼
     code = str(random.randint(100000, 999999))
     st.session_state["verify_code"] = code
     st.session_state["verify_email"] = target_email
     st.session_state["verify_time"] = datetime.now(TZ_TW).isoformat()
 
-    # 組合信件
     msg = MIMEMultipart()
     msg["From"] = f"臺大校園地圖 <{GMAIL_ADDRESS}>"
     msg["To"] = target_email
     msg["Subject"] = "臺大地圖 驗證碼"
     msg.attach(MIMEText(f"你的驗證碼是：{code}\n\n10分鐘內有效。", "plain"))
 
-    # 寄信
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
         server.sendmail(GMAIL_ADDRESS, target_email, msg.as_string())
@@ -163,7 +168,6 @@ def send_verification_code(target_email):
 # ==========================================
 # 1. 初始化設定
 # ==========================================
-# 臺大總區邊界
 ntu_polygon_coords = [
     (121.537209, 25.011598), (121.533004, 25.016414), (121.533402, 25.016789),
     (121.534567, 25.022169), (121.536965, 25.022190), (121.539104, 25.021150),
@@ -172,7 +176,7 @@ ntu_polygon_coords = [
 ntu_campus_poly = Polygon(ntu_polygon_coords)
 folium_bounds = [(lat, lon) for lon, lat in ntu_polygon_coords]
 
-# 登入狀態初始化
+# 登入狀態與其他紀錄初始化
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'user_role' not in st.session_state:
@@ -181,8 +185,6 @@ if 'current_category' not in st.session_state:
     st.session_state.current_category = "充電"
 if 'waiting_verify' not in st.session_state:
     st.session_state.waiting_verify = False
-
-# pending 座標初始化
 if 'pending_lat' not in st.session_state:
     st.session_state.pending_lat = None
 if 'pending_lon' not in st.session_state:
@@ -195,6 +197,8 @@ if 'pending_desc' not in st.session_state:
     st.session_state.pending_desc = ""
 if 'crowd_voted' not in st.session_state:
     st.session_state.crowd_voted = {}
+if 'comment_voted' not in st.session_state:
+    st.session_state.comment_voted = set()
 
 # 從資料庫讀取地點
 if 'locations' not in st.session_state:
@@ -236,7 +240,6 @@ def login_page():
             if not email.endswith("@ntu.edu.tw"):
                 st.error("請輸入有效的臺大信箱！")
             else:
-                # 檢查 60 秒冷卻
                 last_send = st.session_state.get("last_send_time")
                 if last_send and datetime.now(TZ_TW) - datetime.fromisoformat(last_send) < timedelta(seconds=60):
                     remaining = 60 - int((datetime.now(TZ_TW) - datetime.fromisoformat(last_send)).total_seconds())
@@ -273,13 +276,19 @@ def login_page():
 # 3. 主應用程式
 # ==========================================
 def main_app():
-    # 頂部導航與登出
-    col_title, col_logout = st.columns([4, 1])
+    col_title, col_refresh, col_logout = st.columns([3, 1, 1])
     col_title.title("🗺️ 臺大校園地圖指南")
-    if col_logout.button("登出"):
+    
+    if col_refresh.button("🔄 更新地圖資料", use_container_width=True):
+        if "locations" in st.session_state:
+            del st.session_state["locations"]
+        st.rerun()
+
+    if col_logout.button("登出", use_container_width=True):
         st.session_state.logged_in = False
         st.session_state.user_role = None
-        del st.session_state["locations"]
+        if "locations" in st.session_state:
+            del st.session_state["locations"]
         st.rerun()
 
     if st.session_state.user_role == "student":
@@ -287,7 +296,6 @@ def main_app():
     else:
         st.warning("👁️ 訪客模式：可瀏覽與評論，但無法新增地點。")
 
-    # 五個類別按鈕
     categories = ["充電", "情緒釋放", "戶外放鬆", "排練", "面試"]
     cols = st.columns(5)
     for idx, cat in enumerate(categories):
@@ -297,7 +305,6 @@ def main_app():
     st.markdown(f"### 目前選擇類別：**{st.session_state.current_category}**")
     st.divider()
 
-    # 畫面佈局
     col_map, col_details = st.columns([3, 2])
 
     with col_map:
@@ -316,7 +323,6 @@ def main_app():
         for loc_name, floors in current_data.items():
             first_floor = floors[0]
             
-            # 過濾出有數字的擁擠度來計算整棟樓的平均
             valid_crowds = [f['crowd'] for f in floors if isinstance(f['crowd'], (int, float))]
             
             if valid_crowds:
@@ -352,7 +358,6 @@ def main_app():
         if map_data.get("last_clicked"):
             clicked_lat = map_data["last_clicked"]["lat"]
             clicked_lon = map_data["last_clicked"]["lng"]
-            # 存進 session_state
             st.session_state.pending_lat = clicked_lat
             st.session_state.pending_lon = clicked_lon
             st.info(f"📍 獲取地圖座標: 緯度 {clicked_lat:.5f}, 經度 {clicked_lon:.5f}")
@@ -365,7 +370,6 @@ def main_app():
             selected_loc_name = st.selectbox("選擇地點：", loc_list)
             floors_data = current_data[selected_loc_name]
 
-            # 如果只有一個樓層且是「無」，不顯示樓層選單
             if len(floors_data) == 1 and floors_data[0]['floor'] == "無":
                 selected_floor_idx = 0
             else:
@@ -377,6 +381,14 @@ def main_app():
                 )
             selected_loc = floors_data[selected_floor_idx]
 
+            # 即時從資料庫拉取最新擁擠度
+            try:
+                fresh_db = client.table("locations").select("crowdedness").eq("id", selected_loc['id']).execute()
+                if fresh_db.data:
+                    selected_loc['crowd'] = get_recent_crowd(fresh_db.data[0]["crowdedness"])
+            except Exception:
+                pass
+
             if selected_loc.get('image'):
                 st.image(selected_loc['image'], use_container_width=True)
 
@@ -385,7 +397,6 @@ def main_app():
             display_crowd = f"{selected_loc['crowd']} / 5" if selected_loc['crowd'] != "待回報" else "待回報 / 5"
             st.write(f"**平均擁擠程度（1為最不擁擠)：** {display_crowd}")
 
-            # 功能 1: 回報擁擠狀況
             st.write("回報擁擠狀況：")
             if st.session_state.user_role == "student":
                 crowd_cols = st.columns(5)
@@ -398,11 +409,9 @@ def main_app():
                     st.caption(f"⏳ 你已回報過，請等待 {remaining} 秒後再回報")
                 else:
                     for i in range(1, 6):
-                        if crowd_cols[i - 1].button(str(i),
-                                                    key=f"crowd_{selected_loc_name}_{selected_loc['floor']}_{i}"):
+                        if crowd_cols[i - 1].button(str(i), key=f"crowd_{selected_loc_name}_{selected_loc['floor']}_{i}"):
                             update_crowdedness(selected_loc['id'], i)
-                            updated = client.table("locations").select("crowdedness").eq("id",
-                                                                                         selected_loc['id']).execute()
+                            updated = client.table("locations").select("crowdedness").eq("id", selected_loc['id']).execute()
                             selected_loc['crowd'] = get_recent_crowd(updated.data[0]["crowdedness"])
                             st.session_state.crowd_voted[loc_key] = datetime.now(TZ_TW)
                             
@@ -412,14 +421,12 @@ def main_app():
             else:
                 st.caption("請登入台大信箱才能回報擁擠度")
 
-            # 功能 2: 上傳圖片
             with st.expander("📷 上傳或更新此地點的圖片"):
                 update_img_file = st.file_uploader(
                     "選擇圖片", type=["jpg", "png", "jpeg"],
                     key=f"upload_img_{selected_loc_name}_{selected_loc['floor']}"
                 )
-                if st.button("送出圖片", key=f"btn_update_img_{selected_loc_name}_{selected_loc['floor']}",
-                             use_container_width=True):
+                if st.button("送出圖片", key=f"btn_update_img_{selected_loc_name}_{selected_loc['floor']}", use_container_width=True):
                     if update_img_file:
                         image_bytes = update_img_file.read()
                         url = upload_image(selected_loc['id'], image_bytes, update_img_file.name)
@@ -429,22 +436,53 @@ def main_app():
                     else:
                         st.warning("請先選擇要上傳的圖片檔案！")
 
-            # 功能 3: 留言評論
+            # 功能 3: 留言評論 (已加入推/噓功能)
             st.markdown("##### 💬 留言評論")
-            for c in selected_loc['comments']:
-                if isinstance(c, dict):
-                    st.write(f"- {c['text']}　*{c['time']}*")
-                else:
-                    st.write(f"- {c}")  # 相容舊格式
+            for i, c in enumerate(selected_loc['comments']):
+                # 處理舊版格式，讓它自動升級
+                if not isinstance(c, dict):
+                    c = {"text": c, "time": "未知", "upvotes": 0, "downvotes": 0}
+                    selected_loc['comments'][i] = c
+                
+                upvotes = c.get("upvotes", 0)
+                downvotes = c.get("downvotes", 0)
+                
+                # 將文字與兩個按鈕切分為不同比例的區塊
+                col_text, col_up, col_down = st.columns([5, 1.5, 1.5])
+                with col_text:
+                    st.write(f"- {c.get('text', '')}　*{c.get('time', '')}*")
+                with col_up:
+                    if st.button(f"👍 推 {upvotes}", key=f"up_{selected_loc['id']}_{i}"):
+                        vote_key = f"{selected_loc['id']}_comment_{i}"
+                        if vote_key not in st.session_state.comment_voted:
+                            vote_comment(selected_loc['id'], i, "upvote")
+                            c["upvotes"] = upvotes + 1
+                            st.session_state.comment_voted.add(vote_key)
+                            st.rerun()
+                        else:
+                            st.toast("⚠️ 你已經對這則評論投過票囉！")
+                with col_down:
+                    if st.button(f"👎 噓 {downvotes}", key=f"down_{selected_loc['id']}_{i}"):
+                        vote_key = f"{selected_loc['id']}_comment_{i}"
+                        if vote_key not in st.session_state.comment_voted:
+                            vote_comment(selected_loc['id'], i, "downvote")
+                            c["downvotes"] = downvotes + 1
+                            st.session_state.comment_voted.add(vote_key)
+                            st.rerun()
+                        else:
+                            st.toast("⚠️ 你已經對這則評論投過票囉！")
 
-            new_comment = st.text_input("新增評論...", key=f"comment_{selected_loc_name}_{selected_loc['floor']}",max_chars=100)
+            new_comment = st.text_input("新增評論...", key=f"comment_{selected_loc_name}_{selected_loc['floor']}", max_chars=100)
             if st.button("送出評論", use_container_width=True):
                 if new_comment.strip():
-                    selected_loc['comments'].append({
+                    new_c = {
                         "text": new_comment,
-                        "time": datetime.now(TZ_TW).strftime("%Y/%m/%d %H:%M")
-                    })
-                    add_comment(selected_loc['id'], new_comment)
+                        "time": datetime.now(TZ_TW).strftime("%Y/%m/%d %H:%M"),
+                        "upvotes": 0,
+                        "downvotes": 0
+                    }
+                    selected_loc['comments'].append(new_c)
+                    add_comment(selected_loc['id'], new_c)
                     st.rerun()
 
         st.divider()
@@ -452,21 +490,12 @@ def main_app():
         # 新增地點功能
         if st.session_state.user_role == "student":
             with st.expander("➕ 新增地點"):
-
-                # 先選擇新增類型
-                add_mode = st.radio(
-                    "新增方式：",
-                    ["新地點", "現有地點的新樓層"],
-                    key="add_mode"
-                )
+                add_mode = st.radio("新增方式：", ["新地點", "現有地點的新樓層"], key="add_mode")
 
                 if add_mode == "新地點":
                     new_name = st.text_input("地點名稱")
-                    new_floor = st.selectbox(
-                        "選擇樓層",
-                        ["無", "B2", "B1", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
-                    )
-                    new_desc = st.text_area("介紹",max_chars=200)
+                    new_floor = st.selectbox("選擇樓層", ["無", "B2", "B1", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"])
+                    new_desc = st.text_area("介紹", max_chars=200)
 
                     st.session_state.pending_name = new_name
                     st.session_state.pending_floor = new_floor
@@ -519,37 +548,25 @@ def main_app():
                                 st.error("⚠️該座標不在臺大校總區範圍內，無法新增！")
 
                 else:
-                    # 現有地點的新樓層
                     existing_names = list(st.session_state.locations[st.session_state.current_category].keys())
                     if not existing_names:
                         st.warning("目前此類別還沒有地點")
                     else:
                         selected_existing = st.selectbox("選擇要歸入的地點", existing_names)
-
-                        # 過濾已存在的樓層
-                        existing_floor_names = [f['floor'] for f in
-                                                st.session_state.locations[st.session_state.current_category][
-                                                    selected_existing]]
-                        available_floors = [f for f in
-                                            ["無", "B2", "B1", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] if
-                                            f not in existing_floor_names]
+                        existing_floor_names = [f['floor'] for f in st.session_state.locations[st.session_state.current_category][selected_existing]]
+                        available_floors = [f for f in ["無", "B2", "B1", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] if f not in existing_floor_names]
 
                         if not available_floors:
                             st.warning("此地點所有樓層都已新增完畢！")
                         else:
-                            new_floor = st.selectbox(
-                                "選擇樓層",
-                                available_floors,
-                                key="new_floor_existing"
-                            )
-                            new_desc = st.text_area("介紹", key="new_desc_existing",max_chars=200)
+                            new_floor = st.selectbox("選擇樓層", available_floors, key="new_floor_existing")
+                            new_desc = st.text_area("介紹", key="new_desc_existing", max_chars=200)
 
                             st.session_state.pending_floor = new_floor
                             st.session_state.pending_desc = new_desc
 
                             if st.button("新增樓層", type="primary", use_container_width=True):
-                                existing_floors = st.session_state.locations[st.session_state.current_category][
-                                    selected_existing]
+                                existing_floors = st.session_state.locations[st.session_state.current_category][selected_existing]
                                 existing_lat = existing_floors[0]['lat']
                                 existing_lon = existing_floors[0]['lon']
 
@@ -562,10 +579,8 @@ def main_app():
                                     floor=st.session_state.pending_floor
                                 )
                                 new_id = result[0]["id"]
-                                if selected_existing not in st.session_state.locations[
-                                    st.session_state.current_category]:
-                                    st.session_state.locations[st.session_state.current_category][
-                                        selected_existing] = []
+                                if selected_existing not in st.session_state.locations[st.session_state.current_category]:
+                                    st.session_state.locations[st.session_state.current_category][selected_existing] = []
                                 st.session_state.locations[st.session_state.current_category][selected_existing].append(
                                     {
                                         "id": new_id,
