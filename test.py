@@ -57,9 +57,7 @@ def add_location(name, lat, lng, category, intro, floor="無"):
     response = client.table("locations").insert(data).execute()
     return response.data
 
-# 新增：用來更新地點座標的函式
 def update_location_coords(name, category, lat, lng):
-    # 利用 name 和 category 作為條件，一次更新該地點所有樓層的座標
     client.table("locations").update(
         {"lat": lat, "lng": lng}
     ).eq("name", name).eq("category", category).execute()
@@ -441,8 +439,20 @@ def main_app():
                     else:
                         st.warning("請先選擇要上傳的圖片檔案！")
 
+            # --- 功能 3: 留言評論 (加入分頁/看更多功能) ---
             st.markdown("##### 💬 留言評論")
-            for i, c in enumerate(selected_loc['comments']):
+            
+            # 管理該地點的留言顯示上限
+            limit_key = f"comment_limit_{selected_loc['id']}"
+            if limit_key not in st.session_state:
+                st.session_state[limit_key] = 3
+                
+            current_limit = st.session_state[limit_key]
+            total_comments = len(selected_loc['comments'])
+
+            # 只渲染到目前上限的留言數量
+            for i in range(min(total_comments, current_limit)):
+                c = selected_loc['comments'][i]
                 if not isinstance(c, dict):
                     c = {"text": c, "time": "未知", "upvotes": 0, "downvotes": 0}
                     selected_loc['comments'][i] = c
@@ -474,6 +484,12 @@ def main_app():
                         else:
                             st.toast("⚠️ 你已經對這則評論投過票囉！")
 
+            # 如果總留言數大於目前的顯示上限，產生「看更多」按鈕
+            if total_comments > current_limit:
+                if st.button("🔽 看更多留言", use_container_width=True, key=f"btn_more_{selected_loc['id']}"):
+                    st.session_state[limit_key] += 3
+                    st.rerun()
+
             new_comment = st.text_input("新增評論...", key=f"comment_{selected_loc_name}_{selected_loc['floor']}", max_chars=100)
             if st.button("送出評論", use_container_width=True):
                 if new_comment.strip():
@@ -485,6 +501,8 @@ def main_app():
                     }
                     selected_loc['comments'].append(new_c)
                     add_comment(selected_loc['id'], new_c)
+                    # 發送留言後，自動展開所有留言以顯示最新內容
+                    st.session_state[limit_key] = len(selected_loc['comments'])
                     st.rerun()
 
         st.divider()
