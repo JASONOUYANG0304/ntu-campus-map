@@ -50,6 +50,8 @@ def add_location(name, lat, lng, category, intro, floor="無"):
         "category": category,
         "intro": intro,
         "floor": floor,
+        "upvotes": 0,
+        "downvotes": 0,
         "crowdedness": "[]",
         "comments": "[]"
     }
@@ -114,6 +116,31 @@ def delete_comment(location_id, comment_index):
         ).eq("id", location_id).execute()
     except Exception:
         pass
+
+def vote_location(location_id, action):
+    try:
+        loc = client.table("locations").select("upvotes, downvotes").eq("id", location_id).execute().data[0]
+        up = loc.get("upvotes") or 0
+        down = loc.get("downvotes") or 0
+
+        if action == 'upvote':
+            up += 1
+        elif action == 'downvote':
+            down += 1
+        elif action == 'cancel_up':
+            up -= 1
+        elif action == 'cancel_down':
+            down -= 1
+        elif action == 'switch_to_up':
+            up += 1; down -= 1
+        elif action == 'switch_to_down':
+            down += 1; up -= 1
+
+        up, down = max(0, up), max(0, down)
+        client.table("locations").update({"upvotes": up, "downvotes": down}).eq("id", location_id).execute()
+        return up, down
+    except Exception:
+        return 0, 0
 
 def vote_comment(location_id, comment_index, vote_type):
     location = client.table("locations").select("comments").eq("id", location_id).execute()
@@ -209,6 +236,8 @@ if 'pending_desc' not in st.session_state:
     st.session_state.pending_desc = ""
 if 'crowd_voted' not in st.session_state:
     st.session_state.crowd_voted = {}
+if 'loc_votes' not in st.session_state:
+    st.session_state.loc_votes = {}
 if 'comment_voted' not in st.session_state:
     st.session_state.comment_voted = set()
 
@@ -226,6 +255,8 @@ if 'locations' not in st.session_state:
                 "floor": loc.get("floor") or "無",
                 "lat": loc["lat"],
                 "lon": loc["lng"],
+                "upvotes": loc.get("upvotes") or 0,
+                "downvotes": loc.get("downvotes") or 0,
                 "crowd": get_recent_crowd(loc.get("crowdedness", "[]")),
                 "comments": json.loads(loc.get("comments", "[]")),
                 "desc": loc.get("intro", ""),
@@ -401,9 +432,12 @@ def main_app():
             # ---------------------------------
 
             try:
-                fresh_db = client.table("locations").select("crowdedness").eq("id", selected_loc['id']).execute()
+                fresh_db = client.table("locations").select("crowdedness, upvotes, downvotes").eq("id", selected_loc[
+                    'id']).execute()
                 if fresh_db.data:
                     selected_loc['crowd'] = get_recent_crowd(fresh_db.data[0]["crowdedness"])
+                    selected_loc['upvotes'] = fresh_db.data[0].get("upvotes") or 0
+                    selected_loc['downvotes'] = fresh_db.data[0].get("downvotes") or 0
             except Exception:
                 pass
 
@@ -411,6 +445,44 @@ def main_app():
                 st.image(selected_loc['image'], use_container_width=True)
 
             st.write(f"**介紹：** {selected_loc.get('desc', '無')}")
+
+            loc_vote_state = st.session_state.loc_votes.get(selected_loc['id'])
+            col_lup, col_ldown, _ = st.columns([1.5, 1.5, 3])
+
+            with col_lup:
+                lbl_up = f"👍 推 {selected_loc.get('upvotes', 0)}" + (" ✓" if loc_vote_state == 'up' else "")
+                if st.button(lbl_up, key=f"loc_up_{selected_loc['id']}", use_container_width=True):
+                    if loc_vote_state == 'up':
+                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
+                                                                                           'cancel_up')
+                        del st.session_state.loc_votes[selected_loc['id']]
+                    elif loc_vote_state == 'down':
+                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
+                                                                                           'switch_to_up')
+                        st.session_state.loc_votes[selected_loc['id']] = 'up'
+                    else:
+                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'], 'upvote')
+                        st.session_state.loc_votes[selected_loc['id']] = 'up'
+                    st.rerun()
+
+            with col_ldown:
+                lbl_down = f"👎 噓 {selected_loc.get('downvotes', 0)}" + (" ✓" if loc_vote_state == 'down' else "")
+                if st.button(lbl_down, key=f"loc_down_{selected_loc['id']}", use_container_width=True):
+                    if loc_vote_state == 'down':
+                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
+                                                                                           'cancel_down')
+                        del st.session_state.loc_votes[selected_loc['id']]
+                    elif loc_vote_state == 'up':
+                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
+                                                                                           'switch_to_down')
+                        st.session_state.loc_votes[selected_loc['id']] = 'down'
+                    else:
+                        selected_loc['upvotes'], selected_loc['downvotes'] = vote_location(selected_loc['id'],
+                                                                                           'downvote')
+                        st.session_state.loc_votes[selected_loc['id']] = 'down'
+                    st.rerun()
+
+            st.divider()
             
             display_crowd = f"{selected_loc['crowd']} / 5" if selected_loc['crowd'] != "待回報" else "待回報 / 5"
             st.write(f"**平均擁擠程度（1為最不擁擠)：** {display_crowd}")
@@ -482,7 +554,7 @@ def main_app():
                     st.write(f"- {c.get('text', '')}　*{c.get('time', '')}*")
                 with col_up:
                     if st.button(f"👍 推 {upvotes}", key=f"up_{selected_loc['id']}_{i}"):
-                        vote_key = f"{selected_loc['id']}_comment_{i}"
+                        vote_key = f"{selected_loc['id']}_comment_{c.get('time', i)}_{c.get('text', i)[:10]}"
                         if vote_key not in st.session_state.comment_voted:
                             vote_comment(selected_loc['id'], i, "upvote")
                             c["upvotes"] = upvotes + 1
@@ -492,7 +564,7 @@ def main_app():
                             st.toast("⚠️ 你已經對這則評論投過票囉！")
                 with col_down:
                     if st.button(f"👎 噓 {downvotes}", key=f"down_{selected_loc['id']}_{i}"):
-                        vote_key = f"{selected_loc['id']}_comment_{i}"
+                        vote_key = f"{selected_loc['id']}_comment_{c.get('time', i)}_{c.get('text', i)[:10]}"
                         if vote_key not in st.session_state.comment_voted:
                             vote_comment(selected_loc['id'], i, "downvote")
                             c["downvotes"] = downvotes + 1
@@ -582,6 +654,8 @@ def main_app():
                                     "lon": st.session_state.pending_lon,
                                     "crowd": "待回報",
                                     "comments": [],
+                                    "upvotes": 0,
+                                    "downvotes": 0,
                                     "desc": st.session_state.pending_desc,
                                     "image": None
                                 })
@@ -635,6 +709,8 @@ def main_app():
                                         "lat": existing_lat,
                                         "lon": existing_lon,
                                         "crowd": "待回報",
+                                        "upvotes": 0,
+                                        "downvotes": 0,
                                         "comments": [],
                                         "desc": st.session_state.pending_desc,
                                         "image": None
