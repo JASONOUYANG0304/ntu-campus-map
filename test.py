@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+
 # ==========================================
 # 環境變數載入
 # ==========================================
@@ -33,7 +34,6 @@ except Exception:
 # ==========================================
 client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TZ_TW = timezone(timedelta(hours=8))
-
 def get_all_locations():
     # 讀取所有地點
     try:
@@ -60,6 +60,7 @@ def add_location(name, lat, lng, category, intro, floor="無"):
     return response.data
 
 def update_crowdedness(location_id, value):
+
     location = client.table("locations").select("crowdedness").eq("id", location_id).execute()
     raw = json.loads(location.data[0]["crowdedness"] or "[]")
     current = raw if isinstance(raw, list) else [raw]
@@ -87,15 +88,15 @@ def get_recent_crowd(crowdedness_json):
     try:
         data = json.loads(crowdedness_json)
         if not isinstance(data, list) or len(data) == 0:
-            return "待回報"
+            return None
         one_hour_ago = datetime.now(TZ_TW) - timedelta(hours=1)
         recent = [
             item["value"] for item in data
             if isinstance(item, dict) and datetime.fromisoformat(item["time"]) > one_hour_ago
         ]
-        return round(sum(recent) / len(recent), 1) if recent else "待回報"
+        return round(sum(recent) / len(recent), 1) if recent else None
     except:
-        return "待回報"
+        return None
 
 def add_comment(location_id, comment):
     location = client.table("locations").select("comments").eq("id", location_id).execute()
@@ -108,28 +109,18 @@ def add_comment(location_id, comment):
         {"comments": json.dumps(current_comments, ensure_ascii=False)}
     ).eq("id", location_id).execute()
 
-ddef upload_image(location_id, image_bytes, file_name):
+def upload_image(location_id, image_bytes, file_name):
     timestamp = int(datetime.now(TZ_TW).timestamp())
     file_path = f"{location_id}/{timestamp}_{file_name}"
-    
-    try:
-        # 嘗試上傳
-        client.storage.from_("location-images").upload(
-            file_path,
-            image_bytes,
-            {"content-type": "image/jpeg", "x-upsert": "true"} 
-        )
-    except Exception as e:
-        # 如果 Supabase 拒絕，把真正的錯誤訊息顯示在 Streamlit 畫面上
-        st.error(f"❌ Supabase 拒絕上傳，錯誤原因：{str(e)}")
-        st.stop() # 暫停程式往下執行
-    
-    # 如果成功，繼續更新資料庫
+    client.storage.from_("location-images").upload(
+        file_path,
+        image_bytes,
+        {"content-type": "image/jpeg", "upsert": True}
+    )
     url = client.storage.from_("location-images").get_public_url(file_path)
     client.table("locations").update(
         {"image_url": url}
     ).eq("id", location_id).execute()
-    
     return url
 
 # ==========================================
@@ -309,20 +300,12 @@ def main_app():
         current_data = st.session_state.locations[st.session_state.current_category]
         for loc_name, floors in current_data.items():
             first_floor = floors[0]
-            
-            # 過濾出有數字的擁擠度來計算整棟樓的平均
-            valid_crowds = [f['crowd'] for f in floors if isinstance(f['crowd'], (int, float))]
-            
-            if valid_crowds:
-                avg_crowd = sum(valid_crowds) / len(valid_crowds)
-                color = "green" if avg_crowd <= 2 else "orange" if avg_crowd <= 4 else "red"
-                crowd_text = f"{'🟢' if avg_crowd <= 2 else '🟡' if avg_crowd <= 4 else '🔴'} 平均擁擠度: {round(avg_crowd, 1)}/5"
-            else:
-                color = "gray"
-                crowd_text = "⚪ 待回報/5"
-                
-            floor_info = "" if (len(floors) == 1 and floors[0]['floor'] == "無") else f'<span style="color: gray; font-size: 12px;">共 {len(floors)} 個樓層</span><br>'
-            
+            crowd_values = [f['crowd'] for f in floors if f['crowd'] is not None]
+            avg_crowd = sum(crowd_values) / len(crowd_values) if crowd_values else None
+            color = "gray" if avg_crowd is None else "green" if avg_crowd <= 2 else "orange" if avg_crowd <= 4 else "red"
+            crowd_text = "⚪ 暫無資訊" if avg_crowd is None else "🟢 空曠" if avg_crowd <= 2 else "🟡 普通" if avg_crowd <= 4 else "🔴 很擠"
+            floor_info = "" if (len(floors) == 1 and floors[0][
+                'floor'] == "無") else f'<span style="color: gray; font-size: 12px;">共 {len(floors)} 個樓層</span><br>'
             folium.Marker(
                 [first_floor['lat'], first_floor['lon']],
                 popup=folium.Popup(
@@ -375,9 +358,10 @@ def main_app():
                 st.image(selected_loc['image'], use_container_width=True)
 
             st.write(f"**介紹：** {selected_loc.get('desc', '無')}")
-            
-            display_crowd = f"{selected_loc['crowd']} / 5" if selected_loc['crowd'] != "待回報" else "待回報 / 5"
-            st.write(f"**平均擁擠程度（1為最不擁擠)：** {display_crowd}")
+            if selected_loc['crowd'] is None:
+                st.write("**平均擁擠程度：** ⚪ 暫無近期資料")
+            else:
+                st.write(f"**平均擁擠程度：** {selected_loc['crowd']} / 5")
 
             # 功能 1: 回報擁擠狀況
             st.write("回報擁擠狀況：")
@@ -399,9 +383,7 @@ def main_app():
                                                                                          selected_loc['id']).execute()
                             selected_loc['crowd'] = get_recent_crowd(updated.data[0]["crowdedness"])
                             st.session_state.crowd_voted[loc_key] = datetime.now(TZ_TW)
-                            
-                            new_display = f"{selected_loc['crowd']} / 5" if selected_loc['crowd'] != "待回報" else "待回報 / 5"
-                            st.success(f"已更新！目前平均擁擠度：{new_display}")
+                            st.success(f"已更新！目前平均擁擠度：{selected_loc['crowd']} / 5")
                             st.rerun()
             else:
                 st.caption("請登入台大信箱才能回報擁擠度")
@@ -498,7 +480,7 @@ def main_app():
                                     "floor": st.session_state.pending_floor,
                                     "lat": st.session_state.pending_lat,
                                     "lon": st.session_state.pending_lon,
-                                    "crowd": "待回報",
+                                    "crowd": 1,
                                     "comments": [],
                                     "desc": st.session_state.pending_desc,
                                     "image": None
@@ -566,7 +548,7 @@ def main_app():
                                         "floor": st.session_state.pending_floor,
                                         "lat": existing_lat,
                                         "lon": existing_lon,
-                                        "crowd": "待回報",
+                                        "crowd": 1,
                                         "comments": [],
                                         "desc": st.session_state.pending_desc,
                                         "image": None
