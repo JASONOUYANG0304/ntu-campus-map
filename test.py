@@ -166,25 +166,38 @@ def vote_comment(location_id, comment_index, vote_type):
 
 def upload_image(location_id, image_bytes, file_name):
     timestamp = int(datetime.now(TZ_TW).timestamp())
-    ext = os.path.splitext(file_name)[1] 
+    ext = os.path.splitext(file_name)[1]
     safe_file_path = f"{location_id}/{timestamp}{ext}"
-    
+
     try:
         client.storage.from_("location-images").upload(
             safe_file_path,
             image_bytes,
-            {"content-type": f"image/{ext.replace('.', '')}", "x-upsert": "true"} 
+            {"content-type": f"image/{ext.replace('.', '')}", "x-upsert": "true"}
         )
     except Exception as e:
         st.error(f"❌ Supabase 拒絕上傳，錯誤原因：{str(e)}")
         st.stop()
-    
+
     url = client.storage.from_("location-images").get_public_url(safe_file_path)
+
+    # 抓出舊的圖片陣列
+    loc_data = client.table("locations").select("image_url").eq("id", location_id).execute()
+    raw_images = loc_data.data[0].get("image_url")
+
+    if raw_images and raw_images.startswith("["):
+        image_list = json.loads(raw_images)
+    elif raw_images:
+        image_list = [raw_images]
+    else:
+        image_list = []
+
+    image_list.append(url)
     client.table("locations").update(
-        {"image_url": url}
+        {"image_url": json.dumps(image_list)}
     ).eq("id", location_id).execute()
-    
-    return url
+
+    return image_list
 
 # ==========================================
 # 驗證碼寄送
@@ -260,7 +273,7 @@ if 'locations' not in st.session_state:
                 "crowd": get_recent_crowd(loc.get("crowdedness", "[]")),
                 "comments": json.loads(loc.get("comments", "[]")),
                 "desc": loc.get("intro", ""),
-                "image": loc.get("image_url")
+                "images": json.loads(loc.get("image_url")) if (loc.get("image_url") and loc.get("image_url").startswith("[")) else ([loc.get("image_url")] if loc.get("image_url") else [])
             }
             if name not in st.session_state.locations[cat]:
                 st.session_state.locations[cat][name] = []
@@ -442,8 +455,6 @@ def main_app():
             tab_info, tab_comments, tab_photo = st.tabs(["📍 資訊與擁擠度", "💬 留言評論", "📷 新增照片"])
 
             with tab_info:
-                if selected_loc.get('image'):
-                    st.image(selected_loc['image'], use_container_width=True)
 
                 st.write(f"**介紹：** {selected_loc.get('desc', '無')}")
 
@@ -586,19 +597,31 @@ def main_app():
                         st.rerun()
 
             with tab_photo:
-                if selected_loc.get('image'):
-                    st.image(selected_loc['image'], use_container_width=True)
+                st.markdown("##### 📷 地點相簿")
+
+                loc_images = selected_loc.get('images', [])
+
+                if loc_images:
+                    cols = st.columns(2)
+                    for idx, img_url in enumerate(loc_images):
+                        cols[idx % 2].image(img_url, use_container_width=True)
+                else:
+                    st.info("目前還沒有照片，來當第一個上傳的人吧！")
+
+                st.divider()
+
                 update_img_file = st.file_uploader(
-                    "選擇圖片", type=["jpg", "png", "jpeg"],
+                    "➕ 新增照片", type=["jpg", "png", "jpeg"],
                     key=f"upload_img_{selected_loc_name}_{selected_loc['floor']}"
                 )
-                if st.button("送出圖片", key=f"btn_update_img_{selected_loc_name}_{selected_loc['floor']}",
+                if st.button("上傳送出", key=f"btn_update_img_{selected_loc_name}_{selected_loc['floor']}",
                              use_container_width=True):
                     if update_img_file:
-                        image_bytes = update_img_file.read()
-                        url = upload_image(selected_loc['id'], image_bytes, update_img_file.name)
-                        selected_loc['image'] = url
-                        st.success("圖片更新成功！")
+                        with st.spinner("照片上傳中..."):
+                            image_bytes = update_img_file.read()
+                            new_image_list = upload_image(selected_loc['id'], image_bytes, update_img_file.name)
+                            selected_loc['images'] = new_image_list
+                        st.toast("✅ 照片新增成功！", icon="🎉")
                         st.rerun()
                     else:
                         st.warning("請先選擇要上傳的圖片檔案！")
