@@ -400,6 +400,11 @@ def main_app():
             display_crowd = f"{selected_loc['crowd']} / 5" if selected_loc['crowd'] != "待回報" else "待回報 / 5"
             st.write(f"**平均擁擠程度（1為最不擁擠)：** {display_crowd}")
 
+            # --- 新增 Google Maps 導航按鈕 ---
+            google_maps_url = f"https://www.google.com/maps/dir/?api=1&destination={selected_loc['lat']},{selected_loc['lon']}"
+            st.link_button("🗺️ 使用 Google Maps 導航至此", google_maps_url, use_container_width=True)
+            # -------------------------------
+
             st.write("回報擁擠狀況：")
             if st.session_state.user_role == "student":
                 crowd_cols = st.columns(5)
@@ -439,10 +444,9 @@ def main_app():
                     else:
                         st.warning("請先選擇要上傳的圖片檔案！")
 
-            # --- 功能 3: 留言評論 (加入分頁/看更多功能) ---
+            # 功能 3: 留言評論 (加入分頁/看更多功能)
             st.markdown("##### 💬 留言評論")
             
-            # 管理該地點的留言顯示上限
             limit_key = f"comment_limit_{selected_loc['id']}"
             if limit_key not in st.session_state:
                 st.session_state[limit_key] = 3
@@ -450,7 +454,6 @@ def main_app():
             current_limit = st.session_state[limit_key]
             total_comments = len(selected_loc['comments'])
 
-            # 只渲染到目前上限的留言數量
             for i in range(min(total_comments, current_limit)):
                 c = selected_loc['comments'][i]
                 if not isinstance(c, dict):
@@ -484,7 +487,6 @@ def main_app():
                         else:
                             st.toast("⚠️ 你已經對這則評論投過票囉！")
 
-            # 如果總留言數大於目前的顯示上限，產生「看更多」按鈕
             if total_comments > current_limit:
                 if st.button("🔽 看更多留言", use_container_width=True, key=f"btn_more_{selected_loc['id']}"):
                     st.session_state[limit_key] += 3
@@ -501,7 +503,6 @@ def main_app():
                     }
                     selected_loc['comments'].append(new_c)
                     add_comment(selected_loc['id'], new_c)
-                    # 發送留言後，自動展開所有留言以顯示最新內容
                     st.session_state[limit_key] = len(selected_loc['comments'])
                     st.rerun()
 
@@ -633,14 +634,12 @@ def main_app():
                         if st.button("確認修改座標", type="primary", use_container_width=True, key="btn_modify_coords"):
                             pt = Point(st.session_state.pending_lon, st.session_state.pending_lat)
                             if ntu_campus_poly.contains(pt):
-                                # 呼叫更新資料庫的函式
                                 update_location_coords(
                                     name=loc_to_modify, 
                                     category=st.session_state.current_category, 
                                     lat=st.session_state.pending_lat, 
                                     lng=st.session_state.pending_lon
                                 )
-                                # 同步更新本地暫存
                                 for floor_data in st.session_state.locations[st.session_state.current_category][loc_to_modify]:
                                     floor_data["lat"] = st.session_state.pending_lat
                                     floor_data["lon"] = st.session_state.pending_lon
