@@ -639,7 +639,17 @@ def main_app():
                 if loc_images:
                     cols = st.columns(2)
                     for idx, img_url in enumerate(loc_images):
-                        cols[idx % 2].image(img_url, use_container_width=True)
+                        with cols[idx % 2]:
+                            st.image(img_url, use_container_width=True)
+                            if st.session_state.user_role == "student":
+                                if st.button("🗑️", key=f"del_img_{selected_loc['id']}_{idx}", help="刪除此照片"):
+                                    loc_images.pop(idx)
+                                    client.table("locations").update(
+                                        {"image_url": json.dumps(loc_images)}
+                                    ).eq("id", selected_loc['id']).execute()
+                                    selected_loc['images'] = loc_images
+                                    st.toast("✅ 照片已刪除！", icon="✅")
+                                    st.rerun()
                 else:
                     st.info("目前還沒有照片，來當第一個上傳的人吧！")
 
