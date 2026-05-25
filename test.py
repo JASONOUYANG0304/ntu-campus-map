@@ -376,19 +376,52 @@ def main_app():
     if selected_cat:
         st.session_state.current_category = selected_cat
     with st.expander("📊 校園空間數據總覽"):
-        category_counts = {cat: len(st.session_state.locations[cat]) for cat in categories}
-        df = pd.DataFrame({
-            "類別": list(category_counts.keys()),
-            "地點數量": list(category_counts.values())
-        })
-        fig = px.pie(
-            df,
-            names="類別",
-            values="地點數量",
-            title="校園空間資源分佈",
-            hole=0.4
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        col_pie, col_bar = st.columns(2)
+
+        with col_pie:
+            category_counts = {cat: len(st.session_state.locations[cat]) for cat in categories}
+            df = pd.DataFrame({
+                "類別": list(category_counts.keys()),
+                "地點數量": list(category_counts.values())
+            })
+            fig = px.pie(
+                df,
+                names="類別",
+                values="地點數量",
+                title="🗺️ 校園空間資源分佈",
+                hole=0.4
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col_bar:
+            all_locations = []
+            for cat, locs in st.session_state.locations.items():
+                for loc_name, floors in locs.items():
+                    total_upvotes = sum(f.get('upvotes', 0) for f in floors)
+                    all_locations.append({
+                        "地點": loc_name,
+                        "類別": cat,
+                        "推數": total_upvotes
+                    })
+            top5 = sorted(all_locations, key=lambda x: x["推數"], reverse=True)[:5]
+
+            if top5 and top5[0]["推數"] > 0:
+                df_top5 = pd.DataFrame(top5).sort_values(by="推數", ascending=True)
+                fig_bar = px.bar(
+                    df_top5,
+                    x="推數",
+                    y="地點",
+                    orientation='h',
+                    color="類別",
+                    title="🏆 推薦地點 Top 5",
+                    text="推數"
+                )
+                fig_bar.update_traces(textposition='outside')
+                fig_bar.update_layout(yaxis_title=None, xaxis_title="總推數")
+                st.plotly_chart(fig_bar, use_container_width=True)
+            else:
+                st.plotly_chart(px.bar(title="🔥 臺大最夯人氣地點 Top 5"), use_container_width=True)
+                st.info("目前還沒有推薦資料，快去推你喜歡的地點吧！")
     st.divider()
 
     col_map, col_details = st.columns([3, 2])
