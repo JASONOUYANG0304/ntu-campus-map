@@ -11,6 +11,8 @@ from supabase import create_client
 from dotenv import load_dotenv
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import plotly.express as px
+import pandas as pd
 
 # ==========================================
 # 環境變數載入
@@ -373,6 +375,20 @@ def main_app():
     selected_cat = st.pills("選擇空間類別：", categories, default=st.session_state.current_category)
     if selected_cat:
         st.session_state.current_category = selected_cat
+    with st.expander("📊 校園空間數據總覽"):
+        category_counts = {cat: len(st.session_state.locations[cat]) for cat in categories}
+        df = pd.DataFrame({
+            "類別": list(category_counts.keys()),
+            "地點數量": list(category_counts.values())
+        })
+        fig = px.pie(
+            df,
+            names="類別",
+            values="地點數量",
+            title="校園空間資源分佈",
+            hole=0.4
+        )
+        st.plotly_chart(fig, use_container_width=True)
     st.divider()
 
     col_map, col_details = st.columns([3, 2])
